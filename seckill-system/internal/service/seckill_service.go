@@ -4,22 +4,20 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
-	"seckill-system/internal/model"
+	"seckill-system/pkg/kafka"
 	"seckill-system/pkg/redis"
 )
 
 // SeckillService 秒杀业务逻辑层
-type SeckillService struct {
-	db *gorm.DB
-}
+type SeckillService struct{}
 
 // NewSeckillService 创建秒杀服务实例
-func NewSeckillService(db *gorm.DB) *SeckillService {
-	return &SeckillService{db: db}
+func NewSeckillService() *SeckillService {
+	return &SeckillService{}
 }
 
 // SeckillResult 秒杀结果
@@ -45,18 +43,20 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID string, goodsID i
 	// 2. 根据 Lua 脚本返回值判断结果
 	switch result {
 	case -1:
+		log.Printf("秒杀失败（重复秒杀）: userID=%s, goodsID=%d", userID, goodsID)
 		return &SeckillResult{
 			Code:    2,
 			Message: "您已经参与过此商品的秒杀",
 		}, nil
 	case 0:
+		log.Printf("秒杀失败（库存不足）: userID=%s, goodsID=%d", userID, goodsID)
 		return &SeckillResult{
 			Code:    1,
 			Message: "商品已售罄",
 		}, nil
 	case 1:
-		// Redis 扣减成功，同步写入数据库
-		return s.createOrderSync(ctx, userID, goodsID)
+		// Redis 扣减成功，异步发送到 Kafka
+		return s.createOrderAsync(ctx, userID, goodsID)
 	default:
 		return &SeckillResult{
 			Code:    3,
@@ -65,44 +65,22 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID string, goodsID i
 	}
 }
 
-// createOrderSync 同步创建订单到数据库
-func (s *SeckillService) createOrderSync(ctx context.Context, userID string, goodsID int64) (*SeckillResult, error) {
+// createOrderAsync 异步创建订单（发送到 Kafka）
+func (s *SeckillService) createOrderAsync(ctx context.Context, userID string, goodsID int64) (*SeckillResult, error) {
 	orderID := generateOrderID()
 
-	// 使用事务写入数据库
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// 1. 检查是否有有效订单（待支付或已支付）
-		var count int64
-		tx.Model(&model.SeckillOrder{}).Where("user_id = ? AND goods_id = ? AND status IN (0, 1)", userID, goodsID).Count(&count)
-		if count > 0 {
-			return fmt.Errorf("已有有效订单")
-		}
+	// 发送订单消息到 Kafka（带上秒杀时间，毫秒精度）
+	msg := &kafka.OrderMessage{
+		Type:      kafka.MsgTypeCreateOrder,
+		OrderID:   orderID,
+		UserID:    userID,
+		GoodsID:   goodsID,
+		CreatedAt: time.Now().UnixMilli(), // 秒杀时间（毫秒）
+	}
 
-		// 2. 扣减数据库库存（乐观锁）
-		result := tx.Model(&model.SeckillGoods{}).
-			Where("id = ? AND stock > 0", goodsID).
-			Update("stock", gorm.Expr("stock - 1"))
-		if result.RowsAffected == 0 {
-			return fmt.Errorf("库存不足")
-		}
-
-		// 3. 创建订单
-		order := &model.SeckillOrder{
-			OrderID: orderID,
-			UserID:  userID,
-			GoodsID: goodsID,
-			Status:  0, // 待支付
-		}
-		if err := tx.Create(order).Error; err != nil {
-			return fmt.Errorf("创建订单失败: %w", err)
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		// 数据库写入失败，回滚 Redis
-		log.Printf("数据库写入失败，回滚 Redis: userID=%s, goodsID=%d, error=%v", userID, goodsID, err)
+	if err := kafka.SendOrderMessage(ctx, msg); err != nil {
+		// Kafka 发送失败，回滚 Redis
+		log.Printf("Kafka 发送失败，回滚 Redis: userID=%s, goodsID=%d, error=%v", userID, goodsID, err)
 		if rollbackErr := redis.RollbackSeckill(ctx, goodsID, userID); rollbackErr != nil {
 			log.Printf("严重错误：Redis 回滚失败: userID=%s, goodsID=%d, error=%v", userID, goodsID, rollbackErr)
 		}
@@ -112,17 +90,28 @@ func (s *SeckillService) createOrderSync(ctx context.Context, userID string, goo
 		}, err
 	}
 
-	log.Printf("秒杀成功（同步）: userID=%s, goodsID=%d, orderID=%s", userID, goodsID, orderID)
+	log.Printf("秒杀成功（异步）: userID=%s, goodsID=%d, orderID=%s", userID, goodsID, orderID)
+
+	// 将订单缓存到 Redis（立即可查）
+	orderCache := &redis.OrderCache{
+		OrderID:   orderID,
+		UserID:    userID,
+		GoodsID:   goodsID,
+		Status:    0, // 待支付
+		CreatedAt: msg.CreatedAt,
+	}
+	if err := redis.SetOrderCache(ctx, orderCache); err != nil {
+		log.Printf("警告：缓存订单失败: orderID=%s, error=%v", orderID, err)
+	}
 
 	// 将订单添加到延迟队列，用于超时自动取消
 	if err := redis.AddToDelayQueue(ctx, orderID); err != nil {
 		log.Printf("警告：添加延迟队列失败: orderID=%s, error=%v", orderID, err)
-		// 不影响主流程，继续返回成功
 	}
 
 	return &SeckillResult{
 		Code:    0,
-		Message: "秒杀成功，请尽快完成支付",
+		Message: "秒杀成功，订单处理中",
 		OrderID: orderID,
 	}, nil
 }

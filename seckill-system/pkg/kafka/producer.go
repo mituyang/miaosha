@@ -11,11 +11,20 @@ import (
 
 var Writer *kafka.Writer
 
+// 消息类型常量
+const (
+	MsgTypeCreateOrder = "create" // 创建订单
+	MsgTypeUpdateOrder = "update" // 更新订单状态
+)
+
 // OrderMessage 订单消息结构
 type OrderMessage struct {
-	OrderID string `json:"order_id"`
-	UserID  string `json:"user_id"` // 用户名
-	GoodsID int64  `json:"goods_id"`
+	Type      string `json:"type"` // 消息类型：create/update
+	OrderID   string `json:"order_id"`
+	UserID    string `json:"user_id"` // 用户名
+	GoodsID   int64  `json:"goods_id"`
+	Status    int8   `json:"status"`     // 订单状态：0-待支付, 1-已支付, 2-已取消
+	CreatedAt int64  `json:"created_at"` // 秒杀时间（毫秒时间戳）
 }
 
 // InitProducer 初始化 Kafka 生产者
@@ -52,6 +61,18 @@ func SendOrderMessage(ctx context.Context, msg *OrderMessage) error {
 		return fmt.Errorf("发送 Kafka 消息失败: %w", err)
 	}
 	return nil
+}
+
+// SendOrderStatusUpdate 发送订单状态更新消息
+func SendOrderStatusUpdate(ctx context.Context, orderID string, userID string, goodsID int64, status int8) error {
+	msg := &OrderMessage{
+		Type:    MsgTypeUpdateOrder,
+		OrderID: orderID,
+		UserID:  userID,
+		GoodsID: goodsID,
+		Status:  status,
+	}
+	return SendOrderMessage(ctx, msg)
 }
 
 // Close 关闭生产者

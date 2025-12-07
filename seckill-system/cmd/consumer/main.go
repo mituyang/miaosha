@@ -43,6 +43,11 @@ func main() {
 	}
 	log.Println("Redis 连接成功")
 
+	// 初始化 Kafka Producer（用于发送状态更新消息）
+	kafka.InitProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	defer kafka.Close()
+	log.Println("Kafka Producer 初始化成功")
+
 	// 创建 Kafka 消费者
 	consumer := kafka.NewConsumer(
 		cfg.Kafka.Brokers,
@@ -112,54 +117,66 @@ func processExpiredOrders(ctx context.Context, db *gorm.DB) {
 }
 
 // cancelExpiredOrder 取消单个过期订单
+// 优先从 Redis 缓存获取订单信息，发送 Kafka 消息更新 MySQL
 func cancelExpiredOrder(ctx context.Context, db *gorm.DB, orderID string) {
-	// 1. 查询订单
-	var order model.SeckillOrder
-	if err := db.Where("order_id = ?", orderID).First(&order).Error; err != nil {
-		// 订单不存在，直接从队列移除
-		if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
-			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+	var userID string
+	var goodsID int64
+	var currentStatus int8
+
+	// 1. 先从 Redis 缓存查询订单
+	orderCache, err := redis.GetOrderCache(ctx, orderID)
+	if err == nil && orderCache != nil {
+		userID = orderCache.UserID
+		goodsID = orderCache.GoodsID
+		currentStatus = orderCache.Status
+	} else {
+		// 2. 缓存没有，查 MySQL
+		var order model.SeckillOrder
+		if err := db.Where("order_id = ?", orderID).First(&order).Error; err != nil {
+			// 订单不存在，直接从队列移除
+			if removeErr := redis.RemoveFromDelayQueue(ctx, orderID); removeErr != nil {
+				log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, removeErr)
+			}
+			return
 		}
-		return
+		userID = order.UserID
+		goodsID = order.GoodsID
+		currentStatus = order.Status
 	}
 
-	// 2. 只处理待支付状态的订单
-	if order.Status != 0 {
+	// 3. 只处理待支付状态的订单
+	if currentStatus != 0 {
 		// 订单已支付或已取消，从队列移除
-		if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
-			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+		if removeErr := redis.RemoveFromDelayQueue(ctx, orderID); removeErr != nil {
+			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, removeErr)
 		}
 		return
 	}
 
-	// 3. 取消订单（使用条件更新防止并发问题）
-	result := db.Model(&order).Where("status = ?", 0).Update("status", 2)
-	if result.Error != nil || result.RowsAffected == 0 {
-		// 更新失败，可能已被其他地方取消
-		if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
-			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
-		}
-		return
+	// 4. 更新 Redis 缓存状态为已取消
+	if updateErr := redis.UpdateOrderStatus(ctx, orderID, 2); updateErr != nil {
+		log.Printf("更新订单缓存状态失败: orderID=%s, error=%v", orderID, updateErr)
 	}
-
-	// 4. 恢复库存
-	db.Model(&model.SeckillGoods{}).Where("id = ?", order.GoodsID).
-		Update("stock", gorm.Expr("stock + 1"))
 
 	// 5. 恢复 Redis 库存和已购记录
-	stockKey := fmt.Sprintf("seckill:stock:%d", order.GoodsID)
-	boughtKey := fmt.Sprintf("seckill:bought:%d", order.GoodsID)
+	stockKey := fmt.Sprintf("seckill:stock:%d", goodsID)
+	boughtKey := fmt.Sprintf("seckill:bought:%d", goodsID)
 	pipe := redis.Client.Pipeline()
 	pipe.Incr(ctx, stockKey)
-	pipe.SRem(ctx, boughtKey, order.UserID)
-	if _, err := pipe.Exec(ctx); err != nil {
-		log.Printf("恢复 Redis 库存失败: orderID=%s, error=%v", orderID, err)
+	pipe.SRem(ctx, boughtKey, userID)
+	if _, pipeErr := pipe.Exec(ctx); pipeErr != nil {
+		log.Printf("恢复 Redis 库存失败: orderID=%s, error=%v", orderID, pipeErr)
 	}
 
 	// 6. 从延迟队列移除
-	if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
-		log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+	if removeErr := redis.RemoveFromDelayQueue(ctx, orderID); removeErr != nil {
+		log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, removeErr)
 	}
 
-	log.Printf("订单超时取消成功: orderID=%s, userID=%s, goodsID=%d", orderID, order.UserID, order.GoodsID)
+	// 7. 发送 Kafka 消息更新 MySQL
+	if sendErr := kafka.SendOrderStatusUpdate(ctx, orderID, userID, goodsID, 2); sendErr != nil {
+		log.Printf("发送取消状态更新消息失败: orderID=%s, error=%v", orderID, sendErr)
+	}
+
+	log.Printf("订单超时取消成功: orderID=%s, userID=%s, goodsID=%d", orderID, userID, goodsID)
 }

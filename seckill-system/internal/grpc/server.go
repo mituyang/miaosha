@@ -4,8 +4,6 @@ import (
 	"context"
 	"log"
 
-	"gorm.io/gorm"
-
 	pb "seckill-system/api/proto/seckill"
 	"seckill-system/internal/service"
 )
@@ -17,10 +15,10 @@ type SeckillServer struct {
 }
 
 // NewSeckillServer 创建 gRPC 服务实例
-// db: 数据库连接，用于同步写入订单
-func NewSeckillServer(db *gorm.DB) *SeckillServer {
+// 异步模式：通过 Kafka 落库，不需要数据库连接
+func NewSeckillServer() *SeckillServer {
 	return &SeckillServer{
-		seckillService: service.NewSeckillService(db),
+		seckillService: service.NewSeckillService(),
 	}
 }
 

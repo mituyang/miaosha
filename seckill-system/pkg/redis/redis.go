@@ -3,6 +3,8 @@ package redis
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -124,4 +126,107 @@ func GetExpiredOrders(ctx context.Context, limit int64) ([]string, error) {
 // RemoveFromDelayQueue 从延迟队列中移除订单
 func RemoveFromDelayQueue(ctx context.Context, orderID string) error {
 	return Client.ZRem(ctx, OrderDelayQueueKey, orderID).Err()
+}
+
+// ==================== 订单缓存相关 ====================
+
+// OrderCache 订单缓存结构
+type OrderCache struct {
+	OrderID   string `json:"order_id"`
+	UserID    string `json:"user_id"`
+	GoodsID   int64  `json:"goods_id"`
+	Status    int8   `json:"status"`     // 0-待支付, 1-已支付, 2-已取消
+	CreatedAt int64  `json:"created_at"` // 毫秒时间戳
+}
+
+// 订单缓存过期时间（2小时，足够覆盖支付超时）
+const OrderCacheExpire = 2 * time.Hour
+
+// orderCacheKey 生成订单缓存 key
+func orderCacheKey(orderID string) string {
+	return fmt.Sprintf("order:cache:%s", orderID)
+}
+
+// userOrdersKey 生成用户订单列表 key
+func userOrdersKey(userID string) string {
+	return fmt.Sprintf("user:orders:%s", userID)
+}
+
+// SetOrderCache 缓存订单到 Redis
+func SetOrderCache(ctx context.Context, order *OrderCache) error {
+	key := orderCacheKey(order.OrderID)
+	data := fmt.Sprintf("%s|%d|%d|%d", order.UserID, order.GoodsID, order.Status, order.CreatedAt)
+
+	pipe := Client.Pipeline()
+	// 存储订单详情
+	pipe.Set(ctx, key, data, OrderCacheExpire)
+	// 添加到用户订单列表（用于查询我的订单）
+	pipe.SAdd(ctx, userOrdersKey(order.UserID), order.OrderID)
+	pipe.Expire(ctx, userOrdersKey(order.UserID), OrderCacheExpire)
+
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// GetOrderCache 从 Redis 获取订单缓存
+func GetOrderCache(ctx context.Context, orderID string) (*OrderCache, error) {
+	key := orderCacheKey(orderID)
+	data, err := Client.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return nil, nil // 缓存不存在
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 解析数据：userID|goodsID|status|createdAt
+	parts := strings.Split(data, "|")
+	if len(parts) != 4 {
+		return nil, fmt.Errorf("订单缓存格式错误: %s", data)
+	}
+
+	goodsID, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("解析 goodsID 失败: %w", err)
+	}
+	status, err := strconv.ParseInt(parts[2], 10, 8)
+	if err != nil {
+		return nil, fmt.Errorf("解析 status 失败: %w", err)
+	}
+	createdAt, err := strconv.ParseInt(parts[3], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("解析 createdAt 失败: %w", err)
+	}
+
+	return &OrderCache{
+		OrderID:   orderID,
+		UserID:    parts[0],
+		GoodsID:   goodsID,
+		Status:    int8(status),
+		CreatedAt: createdAt,
+	}, nil
+}
+
+// UpdateOrderStatus 更新订单状态（Redis 缓存）
+func UpdateOrderStatus(ctx context.Context, orderID string, status int8) error {
+	order, err := GetOrderCache(ctx, orderID)
+	if err != nil || order == nil {
+		return err // 缓存不存在，不更新
+	}
+	order.Status = status
+	return SetOrderCache(ctx, order)
+}
+
+// GetUserOrderIDs 获取用户的订单ID列表
+func GetUserOrderIDs(ctx context.Context, userID string) ([]string, error) {
+	return Client.SMembers(ctx, userOrdersKey(userID)).Result()
+}
+
+// DeleteOrderCache 删除订单缓存
+func DeleteOrderCache(ctx context.Context, orderID, userID string) error {
+	pipe := Client.Pipeline()
+	pipe.Del(ctx, orderCacheKey(orderID))
+	pipe.SRem(ctx, userOrdersKey(userID), orderID)
+	_, err := pipe.Exec(ctx)
+	return err
 }

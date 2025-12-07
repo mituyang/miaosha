@@ -186,8 +186,8 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// 密码加密存储（使用 bcrypt）
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	// 密码加密存储（使用 bcrypt，cost=4 用于测试环境，生产环境建议 10+）
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 4)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,
@@ -511,8 +511,8 @@ func (h *UserHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	// 加密新密码
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	// 加密新密码（cost=4 用于测试环境）
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), 4)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, Response{
 			Code:    500,

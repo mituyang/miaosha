@@ -14,6 +14,7 @@ import (
 	pb "seckill-system/api/proto/seckill"
 	grpcServer "seckill-system/internal/grpc"
 	"seckill-system/pkg/config"
+	"seckill-system/pkg/kafka"
 	"seckill-system/pkg/redis"
 )
 
@@ -42,6 +43,11 @@ func main() {
 	// 从 MySQL 预热库存到 Redis
 	preloadStockFromMySQL(db)
 
+	// 初始化 Kafka 生产者（异步落库）
+	kafka.InitProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	defer kafka.Close()
+	log.Println("Kafka 生产者初始化成功")
+
 	// 创建 gRPC 服务器
 	lis, err := net.Listen("tcp", ":"+cfg.GRPC.Port)
 	if err != nil {
@@ -53,10 +59,10 @@ func main() {
 		grpc.MaxSendMsgSize(10*1024*1024),
 	)
 
-	// 注册秒杀服务（传入数据库连接，实现同步写入）
-	pb.RegisterSeckillServiceServer(s, grpcServer.NewSeckillServer(db))
+	// 注册秒杀服务（异步模式，通过 Kafka 落库）
+	pb.RegisterSeckillServiceServer(s, grpcServer.NewSeckillServer())
 
-	log.Printf("gRPC 秒杀服务启动在 :%s（同步模式）...", cfg.GRPC.Port)
+	log.Printf("gRPC 秒杀服务启动在 :%s（异步模式）...", cfg.GRPC.Port)
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("启动 gRPC 服务失败: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"seckill-system/pkg/config"
 	"seckill-system/pkg/crypto"
 	"seckill-system/pkg/email"
+	"seckill-system/pkg/kafka"
 	"seckill-system/pkg/redis"
 )
 
@@ -61,6 +62,11 @@ func main() {
 		log.Fatalf("初始化 RSA 加密模块失败: %v", err)
 	}
 	log.Println("RSA 加密模块初始化成功")
+
+	// 初始化 Kafka Producer（用于发送订单状态更新消息）
+	kafka.InitProducer(cfg.Kafka.Brokers, cfg.Kafka.Topic)
+	defer kafka.Close()
+	log.Println("Kafka Producer 初始化成功")
 
 	// 创建 Gin 引擎
 	r := gin.Default()

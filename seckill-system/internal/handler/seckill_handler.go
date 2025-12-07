@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	pb "seckill-system/api/proto/seckill"
 	"seckill-system/internal/model"
+	"seckill-system/pkg/kafka"
 	"seckill-system/pkg/redis"
 )
 
@@ -258,6 +260,7 @@ type OrderInfo struct {
 }
 
 // GetMyOrders 获取当前用户的秒杀订单列表（支持筛选和分页）
+// 合并 Redis 缓存和 MySQL 中的订单，确保未落库的订单也能显示
 func (h *SeckillHandler) GetMyOrders(c *gin.Context) {
 	// 从 JWT Token 中获取用户名
 	username := c.GetString("username")
@@ -283,47 +286,81 @@ func (h *SeckillHandler) GetMyOrders(c *gin.Context) {
 		pageSize = 10
 	}
 
-	// 先处理超时订单（更新数据库状态）
 	ctx := c.Request.Context()
-	var pendingOrders []model.SeckillOrder
-	h.db.Where("user_id = ? AND status = 0", username).Find(&pendingOrders)
-	for i := range pendingOrders {
-		if time.Since(pendingOrders[i].CreatedAt) > time.Minute {
-			h.cancelOrderAndRestoreStock(ctx, &pendingOrders[i])
-		}
-	}
 
-	// 构建查询条件
-	query := h.db.Model(&model.SeckillOrder{}).Where("user_id = ?", username)
+	// 1. 从 Redis 缓存获取用户的订单ID列表
+	cachedOrderIDs, _ := redis.GetUserOrderIDs(ctx, username)
+
+	// 2. 查询 MySQL 中的订单
+	var dbOrders []model.SeckillOrder
+	dbQuery := h.db.Where("user_id = ?", username)
 	if statusStr != "" && statusStr != "-1" {
 		status, err := strconv.Atoi(statusStr)
 		if err == nil && status >= 0 && status <= 2 {
-			query = query.Where("status = ?", status)
+			dbQuery = dbQuery.Where("status = ?", status)
 		}
 	}
+	dbQuery.Order("created_at DESC").Find(&dbOrders)
 
-	// 查询总数
-	var total int64
-	query.Count(&total)
+	// 3. 构建已存在于 MySQL 的订单ID集合
+	dbOrderIDSet := make(map[string]bool)
+	for _, o := range dbOrders {
+		dbOrderIDSet[o.OrderID] = true
+	}
 
-	// 分页查询订单
-	var orders []model.SeckillOrder
-	offset := (page - 1) * pageSize
-	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&orders).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, Response{
-			Code:    500,
-			Message: "查询订单失败",
+	// 4. 从 Redis 缓存获取未落库的订单详情
+	var cachedOrders []OrderInfo
+	for _, orderID := range cachedOrderIDs {
+		// 跳过已在 MySQL 中的订单
+		if dbOrderIDSet[orderID] {
+			continue
+		}
+		// 从 Redis 获取订单详情
+		orderCache, err := redis.GetOrderCache(ctx, orderID)
+		if err != nil || orderCache == nil {
+			continue
+		}
+		// 状态筛选
+		if statusStr != "" && statusStr != "-1" {
+			status, _ := strconv.Atoi(statusStr)
+			if int(orderCache.Status) != status {
+				continue
+			}
+		}
+		cachedOrders = append(cachedOrders, OrderInfo{
+			OrderID:   orderCache.OrderID,
+			GoodsID:   orderCache.GoodsID,
+			Status:    orderCache.Status,
+			CreatedAt: time.UnixMilli(orderCache.CreatedAt).Format("2006-01-02 15:04:05"),
 		})
-		return
 	}
 
-	// 获取商品ID列表
-	goodsIDs := make([]int64, 0, len(orders))
-	for _, o := range orders {
-		goodsIDs = append(goodsIDs, o.GoodsID)
+	// 5. 合并订单列表（Redis 缓存的放前面，因为是最新的）
+	allOrders := make([]OrderInfo, 0, len(cachedOrders)+len(dbOrders))
+
+	// 先添加 Redis 缓存中未落库的订单
+	allOrders = append(allOrders, cachedOrders...)
+
+	// 再添加 MySQL 中的订单
+	for _, o := range dbOrders {
+		allOrders = append(allOrders, OrderInfo{
+			OrderID:   o.OrderID,
+			GoodsID:   o.GoodsID,
+			Status:    o.Status,
+			CreatedAt: o.CreatedAt.Format("2006-01-02 15:04:05"),
+		})
 	}
 
-	// 批量查询商品信息
+	// 6. 获取商品ID列表并批量查询商品名称
+	goodsIDSet := make(map[int64]bool)
+	for _, o := range allOrders {
+		goodsIDSet[o.GoodsID] = true
+	}
+	goodsIDs := make([]int64, 0, len(goodsIDSet))
+	for id := range goodsIDSet {
+		goodsIDs = append(goodsIDs, id)
+	}
+
 	goodsMap := make(map[int64]string)
 	if len(goodsIDs) > 0 {
 		var goods []model.SeckillGoods
@@ -333,26 +370,37 @@ func (h *SeckillHandler) GetMyOrders(c *gin.Context) {
 		}
 	}
 
-	// 组装返回数据
-	orderList := make([]OrderInfo, 0, len(orders))
-	for _, o := range orders {
-		orderList = append(orderList, OrderInfo{
-			OrderID:   o.OrderID,
-			GoodsID:   o.GoodsID,
-			GoodsName: goodsMap[o.GoodsID],
-			Status:    o.Status,
-			CreatedAt: o.CreatedAt.Format("2006-01-02 15:04:05"),
-		})
+	// 7. 填充商品名称
+	for i := range allOrders {
+		allOrders[i].GoodsName = goodsMap[allOrders[i].GoodsID]
 	}
 
-	// 计算总页数
+	// 8. 按创建时间降序排序（最新的在最前面）
+	sort.Slice(allOrders, func(i, j int) bool {
+		return allOrders[i].CreatedAt > allOrders[j].CreatedAt
+	})
+
+	// 9. 分页处理
+	total := int64(len(allOrders))
 	totalPages := (total + int64(pageSize) - 1) / int64(pageSize)
+
+	// 计算分页范围
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start > int(total) {
+		start = int(total)
+	}
+	if end > int(total) {
+		end = int(total)
+	}
+
+	pagedOrders := allOrders[start:end]
 
 	c.JSON(http.StatusOK, Response{
 		Code:    0,
 		Message: "success",
 		Data: gin.H{
-			"list":        orderList,
+			"list":        pagedOrders,
 			"total":       total,
 			"page":        page,
 			"page_size":   pageSize,
@@ -386,65 +434,94 @@ func (h *SeckillHandler) PayOrder(c *gin.Context) {
 		return
 	}
 
-	// 查询订单
-	var order model.SeckillOrder
-	if err := h.db.Where("order_id = ? AND user_id = ?", req.OrderID, username).First(&order).Error; err != nil {
-		c.JSON(http.StatusNotFound, Response{
-			Code:    404,
-			Message: "订单不存在",
-		})
+	ctx := c.Request.Context()
+
+	// 1. 先从 Redis 缓存查询订单
+	orderCache, err := redis.GetOrderCache(ctx, req.OrderID)
+	if err == nil && orderCache != nil && orderCache.UserID == username {
+		// 缓存命中，基于缓存处理
+		if orderCache.Status == 1 {
+			c.JSON(http.StatusOK, Response{Code: 0, Message: "订单已支付"})
+			return
+		}
+		if orderCache.Status == 2 {
+			c.JSON(http.StatusBadRequest, Response{Code: 400, Message: "订单已取消，无法支付"})
+			return
+		}
+
+		// 检查是否超时
+		createdAt := time.UnixMilli(orderCache.CreatedAt)
+		if time.Since(createdAt) > time.Minute {
+			// 超时，更新缓存状态并恢复库存
+			if updateErr := redis.UpdateOrderStatus(ctx, req.OrderID, 2); updateErr != nil {
+				fmt.Printf("更新订单缓存状态失败: %v\n", updateErr)
+			}
+			h.restoreStockOnly(ctx, orderCache.GoodsID, orderCache.UserID)
+			c.JSON(http.StatusBadRequest, Response{Code: 400, Message: "订单已超时取消"})
+			return
+		}
+
+		// 更新 Redis 缓存状态为已支付
+		if updateErr := redis.UpdateOrderStatus(ctx, req.OrderID, 1); updateErr != nil {
+			fmt.Printf("更新订单缓存状态失败: %v\n", updateErr)
+		}
+
+		// 从延迟队列移除
+		if removeErr := redis.RemoveFromDelayQueue(ctx, req.OrderID); removeErr != nil {
+			fmt.Printf("移除延迟队列失败: %v\n", removeErr)
+		}
+
+		// 发送 Kafka 消息更新 MySQL
+		if err := kafka.SendOrderStatusUpdate(ctx, req.OrderID, orderCache.UserID, orderCache.GoodsID, 1); err != nil {
+			fmt.Printf("发送支付状态更新消息失败: %v\n", err)
+		}
+
+		c.JSON(http.StatusOK, Response{Code: 0, Message: "支付成功"})
 		return
 	}
 
-	// 检查订单状态
+	// 2. 缓存没有，查 MySQL
+	var order model.SeckillOrder
+	if err := h.db.Where("order_id = ? AND user_id = ?", req.OrderID, username).First(&order).Error; err != nil {
+		c.JSON(http.StatusNotFound, Response{Code: 404, Message: "订单不存在"})
+		return
+	}
+
 	if order.Status == 1 {
-		c.JSON(http.StatusOK, Response{
-			Code:    0,
-			Message: "订单已支付",
-		})
+		c.JSON(http.StatusOK, Response{Code: 0, Message: "订单已支付"})
 		return
 	}
 	if order.Status == 2 {
-		c.JSON(http.StatusBadRequest, Response{
-			Code:    400,
-			Message: "订单已取消，无法支付",
-		})
+		c.JSON(http.StatusBadRequest, Response{Code: 400, Message: "订单已取消，无法支付"})
 		return
 	}
 
-	// 检查是否超时（1分钟）
 	if time.Since(order.CreatedAt) > time.Minute {
-		// 超时自动取消
-		h.cancelOrderAndRestoreStock(c.Request.Context(), &order)
-		c.JSON(http.StatusBadRequest, Response{
-			Code:    400,
-			Message: "订单已超时取消",
-		})
+		h.cancelOrderAndRestoreStock(ctx, &order)
+		c.JSON(http.StatusBadRequest, Response{Code: 400, Message: "订单已超时取消"})
 		return
 	}
 
-	// 更新订单状态为已支付
-	if err := h.db.Model(&order).Update("status", 1).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, Response{
-			Code:    500,
-			Message: "支付失败",
-		})
-		return
+	// 更新 Redis 缓存状态
+	if updateErr := redis.UpdateOrderStatus(ctx, req.OrderID, 1); updateErr != nil {
+		fmt.Printf("更新订单缓存状态失败: %v\n", updateErr)
 	}
 
-	// 支付成功，从延迟队列移除
-	if err := redis.RemoveFromDelayQueue(c.Request.Context(), req.OrderID); err != nil {
-		// 移除失败不影响主流程，只记录日志
-		fmt.Printf("移除延迟队列失败: orderID=%s, error=%v\n", req.OrderID, err)
+	// 从延迟队列移除
+	if removeErr := redis.RemoveFromDelayQueue(ctx, req.OrderID); removeErr != nil {
+		fmt.Printf("移除延迟队列失败: %v\n", removeErr)
 	}
 
-	c.JSON(http.StatusOK, Response{
-		Code:    0,
-		Message: "支付成功",
-	})
+	// 发送 Kafka 消息更新 MySQL
+	if err := kafka.SendOrderStatusUpdate(ctx, req.OrderID, order.UserID, order.GoodsID, 1); err != nil {
+		fmt.Printf("发送支付状态更新消息失败: %v\n", err)
+	}
+
+	c.JSON(http.StatusOK, Response{Code: 0, Message: "支付成功"})
 }
 
 // GetOrderDetail 获取订单详情（含剩余支付时间）
+// 优先从 Redis 缓存读取，缓存没有再查 MySQL
 func (h *SeckillHandler) GetOrderDetail(c *gin.Context) {
 	username := c.GetString("username")
 	orderID := c.Query("order_id")
@@ -457,6 +534,48 @@ func (h *SeckillHandler) GetOrderDetail(c *gin.Context) {
 		return
 	}
 
+	ctx := c.Request.Context()
+
+	// 1. 先从 Redis 缓存查询
+	orderCache, err := redis.GetOrderCache(ctx, orderID)
+	if err == nil && orderCache != nil && orderCache.UserID == username {
+		// 缓存命中，直接返回
+		createdAt := time.UnixMilli(orderCache.CreatedAt)
+		var remainSeconds int64 = 0
+		if orderCache.Status == 0 {
+			elapsed := time.Since(createdAt)
+			remain := time.Minute - elapsed
+			if remain > 0 {
+				remainSeconds = int64(remain.Seconds())
+			} else {
+				// 已超时，更新缓存状态
+				orderCache.Status = 2
+				if updateErr := redis.UpdateOrderStatus(ctx, orderID, 2); updateErr != nil {
+					fmt.Printf("更新订单缓存状态失败: %v\n", updateErr)
+				}
+			}
+		}
+
+		// 获取商品名称
+		var goods model.SeckillGoods
+		h.db.First(&goods, orderCache.GoodsID)
+
+		c.JSON(http.StatusOK, Response{
+			Code:    0,
+			Message: "success",
+			Data: gin.H{
+				"order_id":       orderCache.OrderID,
+				"goods_id":       orderCache.GoodsID,
+				"goods_name":     goods.GoodsName,
+				"status":         orderCache.Status,
+				"created_at":     createdAt.Format("2006-01-02 15:04:05"),
+				"remain_seconds": remainSeconds,
+			},
+		})
+		return
+	}
+
+	// 2. 缓存没有，查 MySQL
 	var order model.SeckillOrder
 	if err := h.db.Where("order_id = ? AND user_id = ?", orderID, username).First(&order).Error; err != nil {
 		c.JSON(http.StatusNotFound, Response{
@@ -479,7 +598,7 @@ func (h *SeckillHandler) GetOrderDetail(c *gin.Context) {
 			remainSeconds = int64(remain.Seconds())
 		} else {
 			// 已超时，自动取消
-			h.cancelOrderAndRestoreStock(c.Request.Context(), &order)
+			h.cancelOrderAndRestoreStock(ctx, &order)
 			order.Status = 2
 		}
 	}
@@ -499,6 +618,7 @@ func (h *SeckillHandler) GetOrderDetail(c *gin.Context) {
 }
 
 // CancelOrder 用户主动取消订单
+// 优先从 Redis 缓存查询，缓存没有再查 MySQL
 func (h *SeckillHandler) CancelOrder(c *gin.Context) {
 	username := c.GetString("username")
 	if username == "" {
@@ -518,7 +638,48 @@ func (h *SeckillHandler) CancelOrder(c *gin.Context) {
 		return
 	}
 
-	// 查询订单
+	ctx := c.Request.Context()
+
+	// 1. 先从 Redis 缓存查询订单
+	orderCache, err := redis.GetOrderCache(ctx, req.OrderID)
+	if err == nil && orderCache != nil && orderCache.UserID == username {
+		// 缓存命中，基于缓存处理
+		if orderCache.Status != 0 {
+			c.JSON(http.StatusBadRequest, Response{Code: 400, Message: "订单状态不允许取消"})
+			return
+		}
+
+		// 更新 Redis 缓存状态为已取消
+		if updateErr := redis.UpdateOrderStatus(ctx, req.OrderID, 2); updateErr != nil {
+			fmt.Printf("更新订单缓存状态失败: %v\n", updateErr)
+		}
+
+		// 恢复 Redis 库存
+		h.restoreStockOnly(ctx, orderCache.GoodsID, orderCache.UserID)
+
+		// 从延迟队列移除
+		if removeErr := redis.RemoveFromDelayQueue(ctx, req.OrderID); removeErr != nil {
+			fmt.Printf("移除延迟队列失败: %v\n", removeErr)
+		}
+
+		// 发送 Kafka 消息更新 MySQL（Consumer 会处理库存恢复）
+		if err := kafka.SendOrderStatusUpdate(ctx, req.OrderID, orderCache.UserID, orderCache.GoodsID, 2); err != nil {
+			fmt.Printf("发送取消状态更新消息失败: %v\n", err)
+		}
+
+		// 返回取消后的订单状态，方便前端更新 UI
+		c.JSON(http.StatusOK, Response{
+			Code:    0,
+			Message: "订单已取消",
+			Data: gin.H{
+				"order_id": req.OrderID,
+				"status":   2, // 已取消
+			},
+		})
+		return
+	}
+
+	// 2. 缓存没有，查 MySQL
 	var order model.SeckillOrder
 	if err := h.db.Where("order_id = ? AND user_id = ?", req.OrderID, username).First(&order).Error; err != nil {
 		c.JSON(http.StatusNotFound, Response{
@@ -537,41 +698,66 @@ func (h *SeckillHandler) CancelOrder(c *gin.Context) {
 		return
 	}
 
-	// 取消订单并恢复库存
-	h.cancelOrderAndRestoreStock(c.Request.Context(), &order)
+	// 更新 Redis 缓存状态为已取消
+	if updateErr := redis.UpdateOrderStatus(ctx, req.OrderID, 2); updateErr != nil {
+		fmt.Printf("更新订单缓存状态失败: %v\n", updateErr)
+	}
 
+	// 恢复 Redis 库存
+	h.restoreStockOnly(ctx, order.GoodsID, order.UserID)
+
+	// 从延迟队列移除
+	if removeErr := redis.RemoveFromDelayQueue(ctx, req.OrderID); removeErr != nil {
+		fmt.Printf("移除延迟队列失败: %v\n", removeErr)
+	}
+
+	// 发送 Kafka 消息更新 MySQL
+	if err := kafka.SendOrderStatusUpdate(ctx, req.OrderID, order.UserID, order.GoodsID, 2); err != nil {
+		fmt.Printf("发送取消状态更新消息失败: %v\n", err)
+	}
+
+	// 返回取消后的订单状态，方便前端更新 UI
 	c.JSON(http.StatusOK, Response{
 		Code:    0,
 		Message: "订单已取消",
+		Data: gin.H{
+			"order_id": req.OrderID,
+			"status":   2, // 已取消
+		},
 	})
 }
 
-// cancelOrderAndRestoreStock 取消订单并恢复库存
-// 使用条件更新防止重复取消导致库存多次恢复
-func (h *SeckillHandler) cancelOrderAndRestoreStock(ctx context.Context, order *model.SeckillOrder) {
-	// 只有状态为 0（待支付）时才更新为已取消，防止重复操作
-	result := h.db.Model(order).Where("status = ?", 0).Update("status", 2)
-	if result.Error != nil || result.RowsAffected == 0 {
-		// 更新失败或订单已不是待支付状态，不恢复库存
-		return
-	}
-
-	// 恢复 MySQL 库存
-	h.db.Model(&model.SeckillGoods{}).Where("id = ?", order.GoodsID).
-		Update("stock", gorm.Expr("stock + 1"))
-
-	// 恢复 Redis 库存
-	stockKey := fmt.Sprintf("seckill:stock:%d", order.GoodsID)
-	boughtKey := fmt.Sprintf("seckill:bought:%d", order.GoodsID)
+// restoreStockOnly 仅恢复库存（用于 Redis 缓存订单超时，MySQL 可能还未落库）
+// 不更新 MySQL 订单状态，只恢复 Redis 库存和已购记录
+func (h *SeckillHandler) restoreStockOnly(ctx context.Context, goodsID int64, userID string) {
+	stockKey := fmt.Sprintf("seckill:stock:%d", goodsID)
+	boughtKey := fmt.Sprintf("seckill:bought:%d", goodsID)
 
 	pipe := redis.Client.Pipeline()
-	pipe.Incr(ctx, stockKey)                // 库存 +1
-	pipe.SRem(ctx, boughtKey, order.UserID) // 移除已购记录
+	pipe.Incr(ctx, stockKey)          // 库存 +1
+	pipe.SRem(ctx, boughtKey, userID) // 移除已购记录
 	_, _ = pipe.Exec(ctx)
+}
+
+// cancelOrderAndRestoreStock 取消订单并恢复库存
+// 更新 Redis 缓存状态，恢复 Redis 库存，发送 Kafka 消息更新 MySQL
+func (h *SeckillHandler) cancelOrderAndRestoreStock(ctx context.Context, order *model.SeckillOrder) {
+	// 更新 Redis 缓存状态为已取消
+	if err := redis.UpdateOrderStatus(ctx, order.OrderID, 2); err != nil {
+		fmt.Printf("更新订单缓存状态失败: orderID=%s, error=%v\n", order.OrderID, err)
+	}
+
+	// 恢复 Redis 库存
+	h.restoreStockOnly(ctx, order.GoodsID, order.UserID)
 
 	// 从延迟队列移除
 	if err := redis.RemoveFromDelayQueue(ctx, order.OrderID); err != nil {
 		fmt.Printf("移除延迟队列失败: orderID=%s, error=%v\n", order.OrderID, err)
+	}
+
+	// 发送 Kafka 消息更新 MySQL
+	if err := kafka.SendOrderStatusUpdate(ctx, order.OrderID, order.UserID, order.GoodsID, 2); err != nil {
+		fmt.Printf("发送取消状态更新消息失败: orderID=%s, error=%v\n", order.OrderID, err)
 	}
 }
 
