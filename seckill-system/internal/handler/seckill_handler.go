@@ -26,11 +26,14 @@ type SeckillHandler struct {
 }
 
 // NewSeckillHandler 创建 Handler 实例，连接 gRPC 服务
+// 高并发优化：配置连接参数，支持多路复用
 func NewSeckillHandler(grpcAddr string, db *gorm.DB) (*SeckillHandler, error) {
-	// 建立 gRPC 连接
+	// 建立 gRPC 连接，启用 HTTP/2 多路复用
 	conn, err := grpc.Dial(grpcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(10*1024*1024)),
+		grpc.WithInitialWindowSize(1<<20),     // 1MB 初始窗口大小
+		grpc.WithInitialConnWindowSize(1<<20), // 1MB 连接窗口大小
 	)
 	if err != nil {
 		return nil, err
@@ -55,6 +58,7 @@ type Response struct {
 }
 
 // DoSeckill 处理秒杀 HTTP 请求
+// 高并发优化：Gateway 层预检查，快速失败
 func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 	var req SeckillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -75,12 +79,37 @@ func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 		return
 	}
 
-	// 设置超时上下文，防止请求堆积
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	ctx := c.Request.Context()
+
+	// 【优化1】Gateway 层快速预检查，减少无效请求穿透到 gRPC
+	// 检查库存是否为0（允许少量误差，主要是快速拦截）
+	stockKey := fmt.Sprintf("seckill:stock:%d", req.GoodsID)
+	stock, _ := redis.Client.Get(ctx, stockKey).Int64()
+	if stock <= 0 {
+		c.JSON(http.StatusOK, Response{
+			Code:    1,
+			Message: "商品已售罄",
+		})
+		return
+	}
+
+	// 【优化2】检查用户是否已秒杀过（快速拦截重复请求）
+	boughtKey := fmt.Sprintf("seckill:bought:%d", req.GoodsID)
+	isBought, _ := redis.Client.SIsMember(ctx, boughtKey, username).Result()
+	if isBought {
+		c.JSON(http.StatusOK, Response{
+			Code:    2,
+			Message: "您已经参与过此商品的秒杀",
+		})
+		return
+	}
+
+	// 设置超时上下文
+	grpcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	// 调用 gRPC 秒杀服务
-	resp, err := h.grpcClient.DoSeckill(ctx, &pb.SeckillRequest{
+	resp, err := h.grpcClient.DoSeckill(grpcCtx, &pb.SeckillRequest{
 		UserId:  username,
 		GoodsId: req.GoodsID,
 	})

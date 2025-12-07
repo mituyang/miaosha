@@ -71,11 +71,10 @@ func main() {
 	// 创建 Gin 引擎
 	r := gin.Default()
 
-	// 创建限流器: 全局每秒 10000 请求，突发容量 20000
-	globalLimiter := middleware.NewRateLimiter(10000, 20000)
-	// 基于 IP 的限流: 每个 IP 每秒请求数，突发容量
-	// 生产环境建议: (10, 20)，测试时可调大
-	ipLimiter := middleware.NewIPRateLimiter(10000, 20000)
+	// 创建限流器: 测压模式，设置极大值相当于关闭限流
+	// 生产环境建议: 全局 (10000, 20000)，IP (10, 20)
+	globalLimiter := middleware.NewRateLimiter(1000000, 2000000)
+	ipLimiter := middleware.NewIPRateLimiter(1000000, 2000000)
 
 	// 应用全局限流中间件
 	r.Use(middleware.RateLimitMiddleware(globalLimiter))

@@ -13,12 +13,17 @@ import (
 var Client *redis.Client
 
 // InitRedis 初始化 Redis 连接
+// 高并发优化：增大连接池，减少连接等待
 func InitRedis(addr, password string, db int) error {
 	Client = redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
-		PoolSize: 100, // 连接池大小，高并发场景需要调大
+		Addr:         addr,
+		Password:     password,
+		DB:           db,
+		PoolSize:     500,             // 连接池大小，支撑高并发
+		MinIdleConns: 50,              // 最小空闲连接数
+		PoolTimeout:  3 * time.Second, // 获取连接超时
+		ReadTimeout:  1 * time.Second, // 读超时
+		WriteTimeout: 1 * time.Second, // 写超时
 	})
 
 	ctx := context.Background()
@@ -112,14 +117,13 @@ func AddToDelayQueue(ctx context.Context, orderID string) error {
 }
 
 // GetExpiredOrders 获取已过期的订单（score <= 当前时间戳）
-// 返回订单ID列表，最多返回 limit 条
-func GetExpiredOrders(ctx context.Context, limit int64) ([]string, error) {
+// 返回所有过期订单ID列表（不限制数量）
+func GetExpiredOrders(ctx context.Context) ([]string, error) {
 	now := float64(time.Now().Unix())
-	// ZRANGEBYSCORE order:delay:queue 0 <now> LIMIT 0 <limit>
+	// ZRANGEBYSCORE order:delay:queue 0 <now>（不设置 Count 限制）
 	return Client.ZRangeByScore(ctx, OrderDelayQueueKey, &redis.ZRangeBy{
-		Min:   "0",
-		Max:   fmt.Sprintf("%f", now),
-		Count: limit,
+		Min: "0",
+		Max: fmt.Sprintf("%f", now),
 	}).Result()
 }
 

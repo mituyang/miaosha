@@ -49,6 +49,7 @@ func main() {
 	log.Println("Kafka 生产者初始化成功")
 
 	// 创建 gRPC 服务器
+	// 高并发优化：增大并发流数量和窗口大小
 	lis, err := net.Listen("tcp", ":"+cfg.GRPC.Port)
 	if err != nil {
 		log.Fatalf("监听端口失败: %v", err)
@@ -57,6 +58,10 @@ func main() {
 	s := grpc.NewServer(
 		grpc.MaxRecvMsgSize(10*1024*1024),
 		grpc.MaxSendMsgSize(10*1024*1024),
+		grpc.MaxConcurrentStreams(10000),   // 最大并发流数
+		grpc.InitialWindowSize(1<<20),      // 1MB 初始窗口
+		grpc.InitialConnWindowSize(1<<20),  // 1MB 连接窗口
+		grpc.NumStreamWorkers(uint32(100)), // 流处理工作协程数
 	)
 
 	// 注册秒杀服务（异步模式，通过 Kafka 落库）

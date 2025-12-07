@@ -18,6 +18,8 @@ import (
 	"seckill-system/pkg/redis"
 )
 
+// 注意：model 包仍然被 Kafka Consumer 使用
+
 func main() {
 	// 加载配置
 	cfg, err := config.Load()
@@ -97,86 +99,71 @@ func startDelayQueueConsumer(ctx context.Context, db *gorm.DB) {
 }
 
 // processExpiredOrders 处理已过期的订单
+// 批量处理：一次性获取所有过期订单，批量更新 Redis，批量发送 Kafka
 func processExpiredOrders(ctx context.Context, db *gorm.DB) {
-	// 从 Redis 获取已过期的订单（最多处理 100 条）
-	orderIDs, err := redis.GetExpiredOrders(ctx, 100)
+	// 1. 从 Redis 获取所有已过期的订单
+	orderIDs, err := redis.GetExpiredOrders(ctx)
 	if err != nil {
 		log.Printf("获取过期订单失败: %v", err)
 		return
 	}
 
 	if len(orderIDs) == 0 {
-		return // 没有过期订单，直接返回
-	}
-
-	log.Printf("发现 %d 个过期订单，开始处理...", len(orderIDs))
-
-	for _, orderID := range orderIDs {
-		cancelExpiredOrder(ctx, db, orderID)
-	}
-}
-
-// cancelExpiredOrder 取消单个过期订单
-// 优先从 Redis 缓存获取订单信息，发送 Kafka 消息更新 MySQL
-func cancelExpiredOrder(ctx context.Context, db *gorm.DB, orderID string) {
-	var userID string
-	var goodsID int64
-	var currentStatus int8
-
-	// 1. 先从 Redis 缓存查询订单
-	orderCache, err := redis.GetOrderCache(ctx, orderID)
-	if err == nil && orderCache != nil {
-		userID = orderCache.UserID
-		goodsID = orderCache.GoodsID
-		currentStatus = orderCache.Status
-	} else {
-		// 2. 缓存没有，查 MySQL
-		var order model.SeckillOrder
-		if err := db.Where("order_id = ?", orderID).First(&order).Error; err != nil {
-			// 订单不存在，直接从队列移除
-			if removeErr := redis.RemoveFromDelayQueue(ctx, orderID); removeErr != nil {
-				log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, removeErr)
-			}
-			return
-		}
-		userID = order.UserID
-		goodsID = order.GoodsID
-		currentStatus = order.Status
-	}
-
-	// 3. 只处理待支付状态的订单
-	if currentStatus != 0 {
-		// 订单已支付或已取消，从队列移除
-		if removeErr := redis.RemoveFromDelayQueue(ctx, orderID); removeErr != nil {
-			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, removeErr)
-		}
 		return
 	}
 
-	// 4. 更新 Redis 缓存状态为已取消
-	if updateErr := redis.UpdateOrderStatus(ctx, orderID, 2); updateErr != nil {
-		log.Printf("更新订单缓存状态失败: orderID=%s, error=%v", orderID, updateErr)
+	log.Printf("发现 %d 个过期订单，开始批量处理...", len(orderIDs))
+
+	// 2. 批量获取订单缓存信息
+	type orderInfo struct {
+		orderID string
+		userID  string
+		goodsID int64
+	}
+	var toCancel []orderInfo
+
+	for _, orderID := range orderIDs {
+		orderCache, cacheErr := redis.GetOrderCache(ctx, orderID)
+		if cacheErr == nil && orderCache != nil {
+			if orderCache.Status == 0 { // 只处理待支付的
+				toCancel = append(toCancel, orderInfo{
+					orderID: orderID,
+					userID:  orderCache.UserID,
+					goodsID: orderCache.GoodsID,
+				})
+			}
+		}
+		// 无论如何都从延迟队列移除
+		redis.RemoveFromDelayQueue(ctx, orderID)
 	}
 
-	// 5. 恢复 Redis 库存和已购记录
-	stockKey := fmt.Sprintf("seckill:stock:%d", goodsID)
-	boughtKey := fmt.Sprintf("seckill:bought:%d", goodsID)
+	if len(toCancel) == 0 {
+		return
+	}
+
+	// 3. 批量更新 Redis（Pipeline 一次性执行）
 	pipe := redis.Client.Pipeline()
-	pipe.Incr(ctx, stockKey)
-	pipe.SRem(ctx, boughtKey, userID)
+	for _, o := range toCancel {
+		// 更新缓存状态
+		cacheKey := fmt.Sprintf("order:cache:%s", o.orderID)
+		// 恢复库存
+		stockKey := fmt.Sprintf("seckill:stock:%d", o.goodsID)
+		boughtKey := fmt.Sprintf("seckill:bought:%d", o.goodsID)
+
+		pipe.Incr(ctx, stockKey)
+		pipe.SRem(ctx, boughtKey, o.userID)
+		pipe.Del(ctx, cacheKey) // 删除缓存，让后续查询走 MySQL
+	}
 	if _, pipeErr := pipe.Exec(ctx); pipeErr != nil {
-		log.Printf("恢复 Redis 库存失败: orderID=%s, error=%v", orderID, pipeErr)
+		log.Printf("批量更新 Redis 失败: %v", pipeErr)
 	}
 
-	// 6. 从延迟队列移除
-	if removeErr := redis.RemoveFromDelayQueue(ctx, orderID); removeErr != nil {
-		log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, removeErr)
+	// 4. 批量发送 Kafka 消息
+	for _, o := range toCancel {
+		if sendErr := kafka.SendOrderStatusUpdate(ctx, o.orderID, o.userID, o.goodsID, 2); sendErr != nil {
+			log.Printf("发送取消消息失败: orderID=%s, error=%v", o.orderID, sendErr)
+		}
 	}
 
-	// 7. 发送 Kafka 消息更新 MySQL
-	if sendErr := kafka.SendOrderStatusUpdate(ctx, orderID, userID, goodsID, 2); sendErr != nil {
-		log.Printf("发送取消状态更新消息失败: orderID=%s, error=%v", orderID, sendErr)
-	}
-
-	log.Printf("订单超时取消成功: orderID=%s, userID=%s, goodsID=%d", orderID, userID, goodsID)
+	log.Printf("批量取消 %d 个超时订单完成", len(toCancel))
 }

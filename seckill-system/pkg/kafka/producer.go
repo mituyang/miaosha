@@ -28,16 +28,16 @@ type OrderMessage struct {
 }
 
 // InitProducer 初始化 Kafka 生产者
-// 注意：这里使用同步模式，确保消息发送成功后才返回
+// 高并发优化：使用批量发送 + 异步模式
 func InitProducer(brokers []string, topic string) {
 	Writer = &kafka.Writer{
 		Addr:         kafka.TCP(brokers...),
 		Topic:        topic,
 		Balancer:     &kafka.LeastBytes{},
-		BatchSize:    1, // 单条发送，保证实时性
-		BatchTimeout: 10 * time.Millisecond,
-		Async:        false,            // 同步模式！确保发送成功才返回
-		RequiredAcks: kafka.RequireAll, // 要求所有副本确认，保证消息不丢失
+		BatchSize:    100,                  // 批量发送，提升吞吐量
+		BatchTimeout: 5 * time.Millisecond, // 最多等待 5ms 凑批
+		Async:        true,                 // 异步模式，不阻塞主流程
+		RequiredAcks: kafka.RequireOne,     // 只需 Leader 确认，降低延迟
 	}
 }
 
