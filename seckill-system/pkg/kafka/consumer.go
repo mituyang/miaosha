@@ -67,11 +67,12 @@ func (c *Consumer) processMessage(data []byte) error {
 
 	// 使用事务保证数据一致性
 	return c.db.Transaction(func(tx *gorm.DB) error {
-		// 1. 检查订单是否已存在（幂等性）
-		var count int64
-		tx.Model(&model.SeckillOrder{}).Where("order_id = ?", orderMsg.OrderID).Count(&count)
-		if count > 0 {
-			log.Printf("订单 %s 已存在，跳过处理", orderMsg.OrderID)
+		// 1. 检查该用户是否有该商品的有效订单（待支付或已支付）
+		var existingOrder model.SeckillOrder
+		err := tx.Where("user_id = ? AND goods_id = ? AND status IN (0, 1)", orderMsg.UserID, orderMsg.GoodsID).First(&existingOrder).Error
+		if err == nil {
+			// 存在有效订单，跳过
+			log.Printf("用户 %s 已有商品 %d 的有效订单，跳过处理", orderMsg.UserID, orderMsg.GoodsID)
 			return nil
 		}
 
@@ -84,7 +85,7 @@ func (c *Consumer) processMessage(data []byte) error {
 			return fmt.Errorf("商品 %d 库存不足或不存在", orderMsg.GoodsID)
 		}
 
-		// 3. 创建订单
+		// 3. 创建新订单（保留已取消的订单记录）
 		order := &model.SeckillOrder{
 			OrderID: orderMsg.OrderID,
 			UserID:  orderMsg.UserID,
@@ -95,7 +96,7 @@ func (c *Consumer) processMessage(data []byte) error {
 			return fmt.Errorf("创建订单失败: %w", err)
 		}
 
-		log.Printf("订单 %s 创建成功", orderMsg.OrderID)
+		log.Printf("订单 %s 创建成功（用户: %s, 商品: %d）", orderMsg.OrderID, orderMsg.UserID, orderMsg.GoodsID)
 		return nil
 	})
 }

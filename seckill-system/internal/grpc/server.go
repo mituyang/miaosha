@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 
+	"gorm.io/gorm"
+
 	pb "seckill-system/api/proto/seckill"
 	"seckill-system/internal/service"
 )
@@ -15,18 +17,19 @@ type SeckillServer struct {
 }
 
 // NewSeckillServer 创建 gRPC 服务实例
-func NewSeckillServer() *SeckillServer {
+// db: 数据库连接，用于同步写入订单
+func NewSeckillServer(db *gorm.DB) *SeckillServer {
 	return &SeckillServer{
-		seckillService: service.NewSeckillService(),
+		seckillService: service.NewSeckillService(db),
 	}
 }
 
 // DoSeckill 实现秒杀 gRPC 接口
 func (s *SeckillServer) DoSeckill(ctx context.Context, req *pb.SeckillRequest) (*pb.SeckillResponse, error) {
-	log.Printf("收到秒杀请求: userID=%d, goodsID=%d", req.UserId, req.GoodsId)
+	log.Printf("收到秒杀请求: userID=%s, goodsID=%d", req.UserId, req.GoodsId)
 
-	// 参数校验
-	if req.UserId <= 0 || req.GoodsId <= 0 {
+	// 参数校验：用户名不能为空，商品ID必须大于0
+	if req.UserId == "" || req.GoodsId <= 0 {
 		return &pb.SeckillResponse{
 			Code:    3,
 			Message: "参数错误",

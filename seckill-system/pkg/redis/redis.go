@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 )
@@ -61,7 +62,8 @@ var RollbackScript = redis.NewScript(`
 `)
 
 // DoSeckill 执行秒杀 Lua 脚本
-func DoSeckill(ctx context.Context, goodsID, userID int64) (int64, error) {
+// userID 为用户名（字符串）
+func DoSeckill(ctx context.Context, goodsID int64, userID string) (int64, error) {
 	stockKey := fmt.Sprintf("seckill:stock:%d", goodsID)
 	boughtKey := fmt.Sprintf("seckill:bought:%d", goodsID)
 
@@ -73,7 +75,8 @@ func DoSeckill(ctx context.Context, goodsID, userID int64) (int64, error) {
 }
 
 // RollbackSeckill 回滚秒杀操作（Kafka 发送失败时调用）
-func RollbackSeckill(ctx context.Context, goodsID, userID int64) error {
+// userID 为用户名（字符串）
+func RollbackSeckill(ctx context.Context, goodsID int64, userID string) error {
 	stockKey := fmt.Sprintf("seckill:stock:%d", goodsID)
 	boughtKey := fmt.Sprintf("seckill:bought:%d", goodsID)
 
@@ -88,4 +91,37 @@ func RollbackSeckill(ctx context.Context, goodsID, userID int64) error {
 func PreloadStock(ctx context.Context, goodsID int64, stock int) error {
 	stockKey := fmt.Sprintf("seckill:stock:%d", goodsID)
 	return Client.Set(ctx, stockKey, stock, 0).Err()
+}
+
+// 延迟队列相关常量
+const (
+	OrderDelayQueueKey = "order:delay:queue" // 订单延迟队列 key
+	OrderTimeout       = 60                  // 订单超时时间（秒）
+)
+
+// AddToDelayQueue 将订单添加到延迟队列
+// score 为订单过期时间戳（当前时间 + 60秒）
+func AddToDelayQueue(ctx context.Context, orderID string) error {
+	expireAt := float64(time.Now().Unix() + OrderTimeout)
+	return Client.ZAdd(ctx, OrderDelayQueueKey, &redis.Z{
+		Score:  expireAt,
+		Member: orderID,
+	}).Err()
+}
+
+// GetExpiredOrders 获取已过期的订单（score <= 当前时间戳）
+// 返回订单ID列表，最多返回 limit 条
+func GetExpiredOrders(ctx context.Context, limit int64) ([]string, error) {
+	now := float64(time.Now().Unix())
+	// ZRANGEBYSCORE order:delay:queue 0 <now> LIMIT 0 <limit>
+	return Client.ZRangeByScore(ctx, OrderDelayQueueKey, &redis.ZRangeBy{
+		Min:   "0",
+		Max:   fmt.Sprintf("%f", now),
+		Count: limit,
+	}).Result()
+}
+
+// RemoveFromDelayQueue 从延迟队列中移除订单
+func RemoveFromDelayQueue(ctx context.Context, orderID string) error {
+	return Client.ZRem(ctx, OrderDelayQueueKey, orderID).Err()
 }

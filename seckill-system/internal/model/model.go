@@ -20,7 +20,7 @@ type SeckillGoods struct {
 type SeckillOrder struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	OrderID   string    `gorm:"type:varchar(64);uniqueIndex;not null" json:"order_id"` // 订单号
-	UserID    int64     `gorm:"index;not null" json:"user_id"`
+	UserID    string    `gorm:"type:varchar(50);index;not null" json:"user_id"`        // 用户名
 	GoodsID   int64     `gorm:"index;not null" json:"goods_id"`
 	Status    int8      `gorm:"not null;default:0" json:"status"` // 0-待支付, 1-已支付, 2-已取消
 	CreatedAt time.Time `json:"created_at"`
@@ -34,4 +34,19 @@ func (SeckillGoods) TableName() string {
 
 func (SeckillOrder) TableName() string {
 	return "seckill_order"
+}
+
+// User 用户表
+type User struct {
+	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Username  string    `gorm:"type:varchar(50);uniqueIndex;not null" json:"username"`
+	Password  string    `gorm:"type:varchar(255);not null" json:"-"` // 密码不返回给前端
+	Email     string    `gorm:"type:varchar(100);uniqueIndex;not null" json:"email"`
+	Nickname  string    `gorm:"type:varchar(100)" json:"nickname"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (User) TableName() string {
+	return "users"
 }

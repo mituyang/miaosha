@@ -24,7 +24,7 @@ const (
 // 秒杀请求
 type SeckillRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`    // 用户ID
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`     // 用户名
 	GoodsId       int64                  `protobuf:"varint,2,opt,name=goods_id,json=goodsId,proto3" json:"goods_id,omitempty"` // 商品ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -60,11 +60,11 @@ func (*SeckillRequest) Descriptor() ([]byte, []int) {
 	return file_seckill_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SeckillRequest) GetUserId() int64 {
+func (x *SeckillRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
 	}
-	return 0
+	return ""
 }
 
 func (x *SeckillRequest) GetGoodsId() int64 {
@@ -138,8 +138,8 @@ func (x *SeckillResponse) GetOrderId() string {
 // 结果查询请求
 type ResultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        int64                  `protobuf:"varint,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	GoodsId       int64                  `protobuf:"varint,2,opt,name=goods_id,json=goodsId,proto3" json:"goods_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`     // 用户名
+	GoodsId       int64                  `protobuf:"varint,2,opt,name=goods_id,json=goodsId,proto3" json:"goods_id,omitempty"` // 商品ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -174,11 +174,11 @@ func (*ResultRequest) Descriptor() ([]byte, []int) {
 	return file_seckill_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *ResultRequest) GetUserId() int64 {
+func (x *ResultRequest) GetUserId() string {
 	if x != nil {
 		return x.UserId
 	}
-	return 0
+	return ""
 }
 
 func (x *ResultRequest) GetGoodsId() int64 {
@@ -247,14 +247,14 @@ const file_seckill_proto_rawDesc = "" +
 	"\n" +
 	"\rseckill.proto\x12\aseckill\"D\n" +
 	"\x0eSeckillRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x19\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x19\n" +
 	"\bgoods_id\x18\x02 \x01(\x03R\agoodsId\"Z\n" +
 	"\x0fSeckillResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x19\n" +
 	"\border_id\x18\x03 \x01(\tR\aorderId\"C\n" +
 	"\rResultRequest\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\x03R\x06userId\x12\x19\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x19\n" +
 	"\bgoods_id\x18\x02 \x01(\x03R\agoodsId\"C\n" +
 	"\x0eResultResponse\x12\x16\n" +
 	"\x06status\x18\x01 \x01(\x05R\x06status\x12\x19\n" +

@@ -14,7 +14,7 @@ var Writer *kafka.Writer
 // OrderMessage 订单消息结构
 type OrderMessage struct {
 	OrderID string `json:"order_id"`
-	UserID  int64  `json:"user_id"`
+	UserID  string `json:"user_id"` // 用户名
 	GoodsID int64  `json:"goods_id"`
 }
 
@@ -45,7 +45,7 @@ func SendOrderMessage(ctx context.Context, msg *OrderMessage) error {
 	defer cancel()
 
 	err = Writer.WriteMessages(sendCtx, kafka.Message{
-		Key:   []byte(fmt.Sprintf("%d", msg.UserID)),
+		Key:   []byte(msg.UserID), // 用户名作为 key
 		Value: data,
 	})
 	if err != nil {

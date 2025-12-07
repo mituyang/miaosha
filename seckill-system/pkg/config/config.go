@@ -15,6 +15,16 @@ type Config struct {
 	Kafka KafkaConfig
 	GRPC  GRPCConfig
 	HTTP  HTTPConfig
+	Email EmailConfig
+}
+
+// EmailConfig 邮件配置
+type EmailConfig struct {
+	Host     string
+	Port     int
+	Username string
+	Password string
+	From     string
 }
 
 // MySQLConfig MySQL 配置
@@ -68,6 +78,7 @@ func Load() (*Config, error) {
 
 	mysqlPort, _ := strconv.Atoi(getEnv("MYSQL_PORT", "3306"))
 	redisDB, _ := strconv.Atoi(getEnv("REDIS_DB", "0"))
+	smtpPort, _ := strconv.Atoi(getEnv("EMAIL_PORT", "587"))
 
 	Cfg = &Config{
 		MySQL: MySQLConfig{
@@ -92,6 +103,13 @@ func Load() (*Config, error) {
 		},
 		HTTP: HTTPConfig{
 			Port: getEnv("HTTP_PORT", "8080"),
+		},
+		Email: EmailConfig{
+			Host:     getEnv("EMAIL_HOST", "smtp.qq.com"),
+			Port:     smtpPort,
+			Username: getEnv("EMAIL_USERNAME", ""),
+			Password: getEnv("EMAIL_PASSWORD", ""),
+			From:     getEnv("EMAIL_FROM", "秒杀系统"),
 		},
 	}
 

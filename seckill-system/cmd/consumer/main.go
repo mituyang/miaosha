@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -13,6 +15,7 @@ import (
 	"seckill-system/internal/model"
 	"seckill-system/pkg/config"
 	"seckill-system/pkg/kafka"
+	"seckill-system/pkg/redis"
 )
 
 func main() {
@@ -33,6 +36,12 @@ func main() {
 	if err := db.AutoMigrate(&model.SeckillGoods{}, &model.SeckillOrder{}); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
+
+	// 初始化 Redis 连接（用于延迟队列）
+	if err := redis.InitRedis(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB); err != nil {
+		log.Fatalf("连接 Redis 失败: %v", err)
+	}
+	log.Println("Redis 连接成功")
 
 	// 创建 Kafka 消费者
 	consumer := kafka.NewConsumer(
@@ -56,6 +65,101 @@ func main() {
 		cancel()
 	}()
 
-	// 启动消费者
+	// 启动延迟队列消费者（处理超时订单）
+	go startDelayQueueConsumer(ctx, db)
+
+	// 启动 Kafka 消费者
 	consumer.Start(ctx)
+}
+
+// startDelayQueueConsumer 启动延迟队列消费者
+// 每秒从 Redis ZSET 中获取已过期的订单并取消
+func startDelayQueueConsumer(ctx context.Context, db *gorm.DB) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	log.Println("延迟队列消费者启动...")
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("延迟队列消费者退出")
+			return
+		case <-ticker.C:
+			processExpiredOrders(ctx, db)
+		}
+	}
+}
+
+// processExpiredOrders 处理已过期的订单
+func processExpiredOrders(ctx context.Context, db *gorm.DB) {
+	// 从 Redis 获取已过期的订单（最多处理 100 条）
+	orderIDs, err := redis.GetExpiredOrders(ctx, 100)
+	if err != nil {
+		log.Printf("获取过期订单失败: %v", err)
+		return
+	}
+
+	if len(orderIDs) == 0 {
+		return // 没有过期订单，直接返回
+	}
+
+	log.Printf("发现 %d 个过期订单，开始处理...", len(orderIDs))
+
+	for _, orderID := range orderIDs {
+		cancelExpiredOrder(ctx, db, orderID)
+	}
+}
+
+// cancelExpiredOrder 取消单个过期订单
+func cancelExpiredOrder(ctx context.Context, db *gorm.DB, orderID string) {
+	// 1. 查询订单
+	var order model.SeckillOrder
+	if err := db.Where("order_id = ?", orderID).First(&order).Error; err != nil {
+		// 订单不存在，直接从队列移除
+		if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
+			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+		}
+		return
+	}
+
+	// 2. 只处理待支付状态的订单
+	if order.Status != 0 {
+		// 订单已支付或已取消，从队列移除
+		if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
+			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+		}
+		return
+	}
+
+	// 3. 取消订单（使用条件更新防止并发问题）
+	result := db.Model(&order).Where("status = ?", 0).Update("status", 2)
+	if result.Error != nil || result.RowsAffected == 0 {
+		// 更新失败，可能已被其他地方取消
+		if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
+			log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+		}
+		return
+	}
+
+	// 4. 恢复库存
+	db.Model(&model.SeckillGoods{}).Where("id = ?", order.GoodsID).
+		Update("stock", gorm.Expr("stock + 1"))
+
+	// 5. 恢复 Redis 库存和已购记录
+	stockKey := fmt.Sprintf("seckill:stock:%d", order.GoodsID)
+	boughtKey := fmt.Sprintf("seckill:bought:%d", order.GoodsID)
+	pipe := redis.Client.Pipeline()
+	pipe.Incr(ctx, stockKey)
+	pipe.SRem(ctx, boughtKey, order.UserID)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("恢复 Redis 库存失败: orderID=%s, error=%v", orderID, err)
+	}
+
+	// 6. 从延迟队列移除
+	if err := redis.RemoveFromDelayQueue(ctx, orderID); err != nil {
+		log.Printf("移除延迟队列失败: orderID=%s, error=%v", orderID, err)
+	}
+
+	log.Printf("订单超时取消成功: orderID=%s, userID=%s, goodsID=%d", orderID, order.UserID, order.GoodsID)
 }

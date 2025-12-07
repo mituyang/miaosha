@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS seckill_goods (
 CREATE TABLE IF NOT EXISTS seckill_order (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     order_id VARCHAR(64) NOT NULL COMMENT '订单号',
-    user_id BIGINT NOT NULL COMMENT '用户ID',
+    user_id VARCHAR(50) NOT NULL COMMENT '用户名',
     goods_id BIGINT NOT NULL COMMENT '商品ID',
     status TINYINT NOT NULL DEFAULT 0 COMMENT '订单状态: 0-待支付, 1-已支付, 2-已取消',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -29,8 +29,21 @@ CREATE TABLE IF NOT EXISTS seckill_order (
     UNIQUE INDEX uk_order_id (order_id),
     INDEX idx_user_id (user_id),
     INDEX idx_goods_id (goods_id),
-    UNIQUE INDEX uk_user_goods (user_id, goods_id) COMMENT '防止重复下单'
+    INDEX idx_user_goods_status (user_id, goods_id, status) COMMENT '用于查询用户商品的有效订单'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='秒杀订单表';
+
+-- 用户表
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL COMMENT '用户名',
+    password VARCHAR(255) NOT NULL COMMENT '密码（加密）',
+    email VARCHAR(100) NOT NULL COMMENT '邮箱',
+    nickname VARCHAR(100) COMMENT '昵称',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE INDEX uk_username (username),
+    UNIQUE INDEX uk_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
 
 -- 插入测试数据
 INSERT INTO seckill_goods (goods_name, stock, start_time, end_time) VALUES
