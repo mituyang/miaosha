@@ -921,11 +921,21 @@ const handlePay = async () => {
       showToast('支付成功！', 'success')
       payOrder.value.status = 1
       stopCountdown()
+      // 同步更新订单列表中的状态
+      const orderIndex = myOrders.value.findIndex(o => o.order_id === payOrder.value.order_id)
+      if (orderIndex !== -1) {
+        myOrders.value[orderIndex].status = 1
+      }
     } else {
       showToast(res.data.message, 'error')
       // 如果订单已取消，更新状态
       if (res.data.message.includes('取消')) {
         payOrder.value.status = 2
+        // 同步更新订单列表
+        const orderIndex = myOrders.value.findIndex(o => o.order_id === payOrder.value.order_id)
+        if (orderIndex !== -1) {
+          myOrders.value[orderIndex].status = 2
+        }
       }
     }
   } catch (err) {
@@ -946,6 +956,11 @@ const handleCancel = async () => {
       showToast('订单已取消', 'success')
       payOrder.value.status = 2
       stopCountdown()
+      // 同步更新订单列表中的状态，避免需要刷新才能看到最新状态
+      const orderIndex = myOrders.value.findIndex(o => o.order_id === payOrder.value.order_id)
+      if (orderIndex !== -1) {
+        myOrders.value[orderIndex].status = 2
+      }
     } else {
       showToast(res.data.message, 'error')
     }
