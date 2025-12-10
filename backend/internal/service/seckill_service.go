@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"seckill/internal/config"
 	"seckill/internal/dto"
@@ -51,8 +52,9 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64) 
 	case redis.SeckillSuccess:
 		// 3. 发送 MQ 消息，异步落库
 		msg := dto.SeckillMessage{
-			UserID:  userID,
-			GoodsID: goodsID,
+			UserID:      userID,
+			GoodsID:     goodsID,
+			RequestTime: time.Now().UnixMilli(), // 记录用户请求时间
 		}
 		body, _ := json.Marshal(msg)
 

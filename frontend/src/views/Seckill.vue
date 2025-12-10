@@ -95,6 +95,13 @@ const refreshStock = async () => {
 }
 
 const handleSeckill = async (goodsId) => {
+  // 本地拦截：库存为0直接返回，不发请求
+  const goods = goodsList.value.find(g => g.id === goodsId)
+  if (goods && goods.stock <= 0) {
+    showToast('商品已售罄', 'error')
+    return
+  }
+
   seckilling.value = goodsId
   try {
     const res = await doSeckill(goodsId)
@@ -102,6 +109,10 @@ const handleSeckill = async (goodsId) => {
       showToast('秒杀请求已提交，请在订单页查看结果', 'success')
       await refreshStock()
     } else {
+      // 售罄时更新本地库存为0
+      if (res.data.code === 1001 && goods) {
+        goods.stock = 0
+      }
       showToast(res.data.msg, 'error')
     }
   } catch (e) {

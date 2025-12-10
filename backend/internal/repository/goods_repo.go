@@ -51,3 +51,46 @@ func (r *GoodsRepository) IncrStock(id uint64) error {
 		Where("id = ?", id).
 		Update("stock", gorm.Expr("stock + 1")).Error
 }
+
+// DecrStockBatch 批量扣减库存
+// 返回实际扣减的数量
+func (r *GoodsRepository) DecrStockBatch(id uint64, count int) (int64, error) {
+	// 先查询当前库存
+	var goods model.Goods
+	if err := r.db.First(&goods, id).Error; err != nil {
+		return 0, err
+	}
+
+	// 计算实际可扣减数量
+	actualCount := count
+	if int(goods.Stock) < count {
+		actualCount = int(goods.Stock)
+	}
+
+	if actualCount == 0 {
+		return 0, nil
+	}
+
+	// 扣减库存
+	result := r.db.Model(&model.Goods{}).
+		Where("id = ? AND stock >= ?", id, actualCount).
+		Update("stock", gorm.Expr("stock - ?", actualCount))
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return 0, nil
+	}
+
+	return int64(actualCount), nil
+}
+
+// DecrStockSimple 简单扣减库存 (不用乐观锁)
+func (r *GoodsRepository) DecrStockSimple(id uint64) (int64, error) {
+	result := r.db.Model(&model.Goods{}).
+		Where("id = ? AND stock > 0", id).
+		Update("stock", gorm.Expr("stock - 1"))
+	return result.RowsAffected, result.Error
+}

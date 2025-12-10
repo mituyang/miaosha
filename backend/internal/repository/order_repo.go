@@ -78,3 +78,11 @@ func (r *OrderRepository) Pay(orderID uint64) error {
 		"pay_time": r.db.NowFunc(),
 	}).Error
 }
+
+// BatchCreate 批量创建订单
+func (r *OrderRepository) BatchCreate(orders []*model.Order) error {
+	if len(orders) == 0 {
+		return nil
+	}
+	return r.db.CreateInBatches(orders, 100).Error
+}
