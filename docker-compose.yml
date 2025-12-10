@@ -1,0 +1,117 @@
+networks:
+  seckill-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: seckill-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: "root123"
+      MYSQL_DATABASE: seckill
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      seckill-net:
+
+  redis:
+    image: redis:7-alpine
+    container_name: seckill-redis
+    ports:
+      - "6379:6379"
+    networks:
+      seckill-net:
+
+  namesrv:
+    image: apache/rocketmq:5.1.3
+    container_name: seckill-namesrv
+    ports:
+      - "9876:9876"
+    command: sh mqnamesrv
+    networks:
+      seckill-net:
+        ipv4_address: 172.28.0.10
+
+  broker:
+    image: apache/rocketmq:5.1.3
+    container_name: seckill-broker
+    ports:
+      - "10911:10911"
+      - "10909:10909"
+    environment:
+      NAMESRV_ADDR: 172.28.0.10:9876
+    volumes:
+      - ./backend/configs/broker.conf:/home/rocketmq/rocketmq-5.1.3/conf/broker.conf
+    command: sh mqbroker -n 172.28.0.10:9876 -c /home/rocketmq/rocketmq-5.1.3/conf/broker.conf --enable-proxy
+    depends_on:
+      - namesrv
+    networks:
+      seckill-net:
+        ipv4_address: 172.28.0.11
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: seckill-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/configs/config.docker.yaml:/app/configs/config.yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      broker:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      seckill-net:
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: seckill-worker
+    command: ["/app/worker"]
+    volumes:
+      - ./backend/configs/config.docker.yaml:/app/configs/config.yaml
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      broker:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      seckill-net:
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: seckill-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      seckill-net:
+
+volumes:
+  mysql_data:

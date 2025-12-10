@@ -1,0 +1,31 @@
+# 秒杀系统配置文件
+
+server:
+  port: 8080
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  database: seckill
+  username: root
+  password: root123
+  max_open_conns: 100
+  max_idle_conns: 10
+
+redis:
+  addr: 127.0.0.1:6379
+  password: ""
+  db: 0
+  pool_size: 100
+
+rocketmq:
+  namesrv: 127.0.0.1:9876
+  topic: seckill_order
+  group: seckill_consumer_group
+
+jwt:
+  secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="
+  expire_hours: 24
+
+admin:
+  secret: "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8="

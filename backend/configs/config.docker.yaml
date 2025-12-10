@@ -1,0 +1,29 @@
+server:
+  port: 8080
+
+mysql:
+  host: mysql
+  port: 3306
+  database: seckill
+  username: root
+  password: root123
+  max_open_conns: 100
+  max_idle_conns: 10
+
+redis:
+  addr: redis:6379
+  password: ""
+  db: 0
+  pool_size: 100
+
+rocketmq:
+  namesrv: 172.28.0.10:9876
+  topic: seckill_order
+  group: seckill_consumer
+
+jwt:
+  secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="
+  expire_hours: 24
+
+admin:
+  secret: "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8="
