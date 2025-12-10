@@ -8,11 +8,6 @@
       </button>
     </div>
 
-    <!-- 消息提示 -->
-    <div v-if="message" :class="['alert', `alert-${messageType}`]">
-      {{ message }}
-    </div>
-
     <!-- 订单列表 -->
     <div v-if="loading && orders.length === 0" class="loading">加载中...</div>
     
@@ -56,23 +51,23 @@
         </div>
       </div>
     </div>
+
+    <Toast ref="toast" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getOrders, payOrder, cancelOrder } from '../api'
+import Toast from '../components/Toast.vue'
 
+const toast = ref(null)
 const loading = ref(false)
 const processing = ref(null)
 const orders = ref([])
-const message = ref('')
-const messageType = ref('info')
 
-const showMessage = (msg, type = 'info') => {
-  message.value = msg
-  messageType.value = type
-  setTimeout(() => { message.value = '' }, 3000)
+const showToast = (message, type = 'info') => {
+  toast.value?.show(message, type)
 }
 
 const statusText = (status) => {
@@ -104,13 +99,13 @@ const handlePay = async (orderId) => {
   try {
     const res = await payOrder(orderId)
     if (res.data.code === 0) {
-      showMessage('支付成功', 'success')
+      showToast('支付成功', 'success')
       await fetchOrders()
     } else {
-      showMessage(res.data.msg, 'error')
+      showToast(res.data.msg, 'error')
     }
   } catch (e) {
-    showMessage(e.response?.data?.msg || '支付失败', 'error')
+    showToast(e.response?.data?.msg || '支付失败', 'error')
   } finally {
     processing.value = null
   }
@@ -121,13 +116,13 @@ const handleCancel = async (orderId) => {
   try {
     const res = await cancelOrder(orderId)
     if (res.data.code === 0) {
-      showMessage('订单已取消', 'success')
+      showToast('订单已取消', 'success')
       await fetchOrders()
     } else {
-      showMessage(res.data.msg, 'error')
+      showToast(res.data.msg, 'error')
     }
   } catch (e) {
-    showMessage(e.response?.data?.msg || '取消失败', 'error')
+    showToast(e.response?.data?.msg || '取消失败', 'error')
   } finally {
     processing.value = null
   }

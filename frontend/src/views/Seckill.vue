@@ -8,11 +8,6 @@
       </button>
     </div>
 
-    <!-- 消息提示 -->
-    <div v-if="message" :class="['alert', `alert-${messageType}`]">
-      {{ message }}
-    </div>
-
     <!-- 商品列表 -->
     <div v-if="loading" class="loading">加载中...</div>
     
@@ -56,19 +51,21 @@
         </button>
       </div>
     </div>
+
+    <Toast ref="toast" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { doSeckill, getStock, warmUpAll } from '../api'
+import Toast from '../components/Toast.vue'
 
+const toast = ref(null)
 const loading = ref(false)
 const refreshing = ref(false)
 const seckilling = ref(null)
 const warming = ref(false)
-const message = ref('')
-const messageType = ref('info')
 const adminSecret = ref('')
 
 const goodsList = ref([
@@ -76,10 +73,8 @@ const goodsList = ref([
   { id: 2, name: 'MacBook Pro M3', price: 12999, stock: 0 }
 ])
 
-const showMessage = (msg, type = 'info') => {
-  message.value = msg
-  messageType.value = type
-  setTimeout(() => { message.value = '' }, 3000)
+const showToast = (message, type = 'info') => {
+  toast.value?.show(message, type)
 }
 
 const refreshStock = async () => {
@@ -91,9 +86,9 @@ const refreshStock = async () => {
         goods.stock = res.data.data.stock
       }
     }
-    showMessage('库存已刷新', 'success')
+    showToast('库存已刷新', 'success')
   } catch (e) {
-    showMessage('刷新失败', 'error')
+    showToast('刷新失败', 'error')
   } finally {
     refreshing.value = false
   }
@@ -104,13 +99,13 @@ const handleSeckill = async (goodsId) => {
   try {
     const res = await doSeckill(goodsId)
     if (res.data.code === 0) {
-      showMessage('秒杀请求已提交，请在订单页查看结果', 'success')
+      showToast('秒杀请求已提交，请在订单页查看结果', 'success')
       await refreshStock()
     } else {
-      showMessage(res.data.msg, 'error')
+      showToast(res.data.msg, 'error')
     }
   } catch (e) {
-    showMessage(e.response?.data?.msg || '请求失败', 'error')
+    showToast(e.response?.data?.msg || '请求失败', 'error')
   } finally {
     seckilling.value = null
   }
@@ -118,20 +113,20 @@ const handleSeckill = async (goodsId) => {
 
 const handleWarmUp = async () => {
   if (!adminSecret.value) {
-    showMessage('请输入 Admin Secret', 'error')
+    showToast('请输入 Admin Secret', 'error')
     return
   }
   warming.value = true
   try {
     const res = await warmUpAll(adminSecret.value)
     if (res.data.code === 0) {
-      showMessage(`预热完成，共 ${res.data.data.count} 个商品`, 'success')
+      showToast(`预热完成，共 ${res.data.data.count} 个商品`, 'success')
       await refreshStock()
     } else {
-      showMessage(res.data.msg, 'error')
+      showToast(res.data.msg, 'error')
     }
   } catch (e) {
-    showMessage(e.response?.data?.msg || '预热失败', 'error')
+    showToast(e.response?.data?.msg || '预热失败', 'error')
   } finally {
     warming.value = false
   }
