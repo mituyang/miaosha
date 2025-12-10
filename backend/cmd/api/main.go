@@ -31,6 +31,10 @@ func warmUpStock(cfg *config.Config) {
 }
 
 func main() {
+	// 设置时区为东八区
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	time.Local = loc
+
 	// 0. 初始化日志
 	logFile, err := logger.Init("api")
 	if err != nil {

@@ -65,10 +65,10 @@ func (c *Consumer) Start() error {
 		return fmt.Errorf("subscribe seckill topic failed: %w", err)
 	}
 
-	// 订阅订单超时消息
+	// 订阅订单超时消息 (可选，失败不影响主流程)
 	err = pc.Subscribe(TopicOrderTimeout, consumer.MessageSelector{}, c.handleTimeoutMessage)
 	if err != nil {
-		return fmt.Errorf("subscribe timeout topic failed: %w", err)
+		logger.Error.Printf("subscribe timeout topic failed (ignored): %v", err)
 	}
 
 	if err := pc.Start(); err != nil {

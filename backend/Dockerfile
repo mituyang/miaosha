@@ -14,6 +14,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/worker ./cmd/worker
 # 运行镜像
 FROM alpine:3.19
 
+# 安装时区数据
+RUN apk add --no-cache tzdata
+
 WORKDIR /app
 
 COPY --from=builder /app/bin/api /app/api

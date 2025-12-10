@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"seckill/internal/config"
 	"seckill/internal/worker"
@@ -14,6 +15,10 @@ import (
 )
 
 func main() {
+	// 设置时区为东八区
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	time.Local = loc
+
 	// 0. 初始化日志
 	logFile, err := logger.Init("worker")
 	if err != nil {

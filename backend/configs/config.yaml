@@ -25,7 +25,7 @@ rocketmq:
 
 jwt:
   secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="
-  expire_hours: 24
+  expire_hours: 240000
 
 admin:
   secret: "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8="
