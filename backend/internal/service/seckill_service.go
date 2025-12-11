@@ -35,10 +35,10 @@ func NewSeckillService(cfg *config.Config) *SeckillService {
 	}
 }
 
-// DoSeckill 秒杀核心逻辑: Redis预减 -> 发MQ
+// DoSeckill 秒杀核心逻辑: 检查资格 -> 发MQ -> Consumer扣库存
 func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64) (Result, error) {
-	// 1. Redis 预减库存 (原子操作)
-	result, err := redis.PreDecrStock(ctx, goodsID, userID)
+	// 1. 检查用户资格并标记（不扣库存）
+	result, segmentID, err := redis.CheckAndMark(ctx, goodsID, userID)
 	if err != nil {
 		return ResultError, err
 	}
@@ -54,13 +54,14 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64) 
 		msg := dto.SeckillMessage{
 			UserID:      userID,
 			GoodsID:     goodsID,
-			RequestTime: time.Now().UnixMilli(), // 记录用户请求时间
+			SegmentID:   segmentID,
+			RequestTime: time.Now().UnixMilli(),
 		}
 		body, _ := json.Marshal(msg)
 
 		if err := mq.SendSeckillMsg(ctx, s.cfg.RocketMQ.Topic, body); err != nil {
-			// MQ 发送失败，回滚 Redis 库存
-			_ = redis.RollbackStock(ctx, goodsID, userID)
+			// MQ 发送失败，清除用户标记（允许重试）
+			_ = redis.ClearUserMark(ctx, goodsID, userID)
 			return ResultError, err
 		}
 
@@ -75,8 +76,18 @@ func (s *SeckillService) GetStock(ctx context.Context, goodsID uint64) (int, err
 	return redis.GetStock(ctx, goodsID)
 }
 
-// WarmUp 库存预热 - 将 MySQL 库存同步到 Redis
+// WarmUp 库存预热 - 将 MySQL 库存同步到 Redis（带分布式锁）
 func (s *SeckillService) WarmUp(ctx context.Context, goodsID uint64) error {
+	// 获取分布式锁
+	acquired, err := redis.AcquireWarmupLock(ctx, goodsID)
+	if err != nil {
+		return fmt.Errorf("acquire warmup lock failed: %w", err)
+	}
+	if !acquired {
+		return fmt.Errorf("warmup is already in progress for goods %d", goodsID)
+	}
+	defer redis.ReleaseWarmupLock(ctx, goodsID)
+
 	goods, err := s.goodsRepo.GetByID(goodsID)
 	if err != nil {
 		return fmt.Errorf("get goods failed: %w", err)
@@ -95,8 +106,18 @@ func (s *SeckillService) WarmUp(ctx context.Context, goodsID uint64) error {
 	return nil
 }
 
-// WarmUpAll 预热所有商品库存
+// WarmUpAll 预热所有商品库存（带分布式锁）
 func (s *SeckillService) WarmUpAll(ctx context.Context) (int, error) {
+	// 获取全量预热分布式锁
+	acquired, err := redis.AcquireWarmupAllLock(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("acquire warmup all lock failed: %w", err)
+	}
+	if !acquired {
+		return 0, fmt.Errorf("warmup all is already in progress")
+	}
+	defer redis.ReleaseWarmupAllLock(ctx)
+
 	goods, err := s.goodsRepo.GetAll()
 	if err != nil {
 		return 0, fmt.Errorf("get all goods failed: %w", err)

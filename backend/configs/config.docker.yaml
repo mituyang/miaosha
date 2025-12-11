@@ -14,7 +14,7 @@ redis:
   addr: redis:6379
   password: ""
   db: 0
-  pool_size: 100
+  pool_size: 500
 
 rocketmq:
   namesrv: 172.28.0.10:9876

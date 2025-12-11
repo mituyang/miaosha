@@ -9,12 +9,14 @@ type SeckillRequest struct {
 type SeckillMessage struct {
 	UserID      uint64 `json:"user_id"`
 	GoodsID     uint64 `json:"goods_id"`
+	SegmentID   int    `json:"segment_id"`   // Redis 库存分段ID
 	RequestTime int64  `json:"request_time"` // 用户请求时间戳(毫秒)
 }
 
 // OrderTimeoutMessage 订单超时消息
 type OrderTimeoutMessage struct {
-	OrderID uint64 `json:"order_id"`
-	UserID  uint64 `json:"user_id"`
-	GoodsID uint64 `json:"goods_id"`
+	OrderID   uint64 `json:"order_id"`
+	UserID    uint64 `json:"user_id"`
+	GoodsID   uint64 `json:"goods_id"`
+	SegmentID int    `json:"segment_id"` // Redis 库存分段ID
 }

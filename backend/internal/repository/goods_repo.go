@@ -94,3 +94,11 @@ func (r *GoodsRepository) DecrStockSimple(id uint64) (int64, error) {
 		Update("stock", gorm.Expr("stock - 1"))
 	return result.RowsAffected, result.Error
 }
+
+// DecrStockWithTx 在事务中扣减库存
+func (r *GoodsRepository) DecrStockWithTx(tx *gorm.DB, id uint64) (int64, error) {
+	result := tx.Model(&model.Goods{}).
+		Where("id = ? AND stock > 0", id).
+		Update("stock", gorm.Expr("stock - 1"))
+	return result.RowsAffected, result.Error
+}

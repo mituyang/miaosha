@@ -14,9 +14,19 @@ func NewOrderRepository(db *gorm.DB) *OrderRepository {
 	return &OrderRepository{db: db}
 }
 
+// GetDB 获取数据库连接（用于事务）
+func (r *OrderRepository) GetDB() *gorm.DB {
+	return r.db
+}
+
 // Create 创建订单
 func (r *OrderRepository) Create(order *model.Order) error {
 	return r.db.Create(order).Error
+}
+
+// CreateWithTx 在事务中创建订单
+func (r *OrderRepository) CreateWithTx(tx *gorm.DB, order *model.Order) error {
+	return tx.Create(order).Error
 }
 
 // ExistsByUserAndGoods 检查用户是否有该商品的有效订单（未取消）
@@ -69,6 +79,15 @@ func (r *OrderRepository) FindByIDAndUserID(orderID, userID uint64) (*model.Orde
 // UpdateStatus 更新订单状态
 func (r *OrderRepository) UpdateStatus(orderID uint64, status uint8) error {
 	return r.db.Model(&model.Order{}).Where("id = ?", orderID).Update("status", status).Error
+}
+
+// CancelOrder 取消订单（CAS 操作，只有待支付状态才能取消）
+// 返回影响行数，0 表示订单不存在或状态不是待支付
+func (r *OrderRepository) CancelOrder(orderID uint64) (int64, error) {
+	result := r.db.Model(&model.Order{}).
+		Where("id = ? AND status = 0", orderID).
+		Update("status", 2)
+	return result.RowsAffected, result.Error
 }
 
 // Pay 支付订单

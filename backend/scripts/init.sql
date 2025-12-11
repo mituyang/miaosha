@@ -28,7 +28,8 @@ CREATE TABLE IF NOT EXISTS orders (
     
     PRIMARY KEY (id), -- 分布式ID作为主键
     INDEX idx_user_id (user_id),
-    INDEX idx_user_goods_status (user_id, goods_id, status)
+    INDEX idx_user_goods_status (user_id, goods_id, status),
+    UNIQUE INDEX uk_user_goods (user_id, goods_id) -- 唯一索引：防止重复下单
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单表';
 
 -- users表
