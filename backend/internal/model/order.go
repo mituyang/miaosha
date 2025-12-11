@@ -15,6 +15,7 @@ type Order struct {
 	Status     uint8      `gorm:"not null;default:0" json:"Status"` // 0-未支付, 1-已支付, 2-已取消
 	CreateTime time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP" json:"CreateTime"`
 	PayTime    *time.Time `gorm:"default:null" json:"PayTime"`
+	CancelTime *time.Time `gorm:"default:null" json:"CancelTime"`
 }
 
 // TableName 表名

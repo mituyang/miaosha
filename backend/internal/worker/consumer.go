@@ -331,7 +331,7 @@ func (c *Consumer) handleTimeoutMessage(ctx context.Context, msgs ...*primitive.
 
 func (c *Consumer) checkAndCancelOrder(ctx context.Context, msg dto.OrderTimeoutMessage) error {
 	// 使用 CAS 更新，只有 status=0 才能取消，保证幂等
-	affected, err := c.orderRepo.CancelOrder(msg.OrderID)
+	affected, err := c.orderRepo.CancelOrder(msg.OrderID, time.Now())
 	if err != nil {
 		return fmt.Errorf("cancel order failed: %w", err)
 	}

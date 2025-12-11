@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"time"
 
 	"seckill/internal/repository"
 	"seckill/pkg/database"
@@ -35,7 +36,7 @@ func (s *OrderService) PayOrder(orderID, userID uint64) error {
 	if order.Status != 0 {
 		return ErrOrderStatusInvalid
 	}
-	return s.orderRepo.Pay(orderID)
+	return s.orderRepo.Pay(orderID, time.Now())
 }
 
 // CancelOrder 取消订单并返还库存
@@ -49,8 +50,12 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 	}
 
 	// 1. 取消订单
-	if err := s.orderRepo.UpdateStatus(orderID, 2); err != nil {
+	affected, err := s.orderRepo.CancelOrder(orderID, time.Now())
+	if err != nil {
 		return err
+	}
+	if affected == 0 {
+		return ErrOrderStatusInvalid
 	}
 
 	// 2. 返还 MySQL 库存

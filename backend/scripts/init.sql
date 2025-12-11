@@ -23,8 +23,9 @@ CREATE TABLE IF NOT EXISTS orders (
     goods_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
     pay_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '支付金额',
     status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '订单状态: 0-未支付, 1-已支付, 2-已取消',
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    pay_time DATETIME DEFAULT NULL COMMENT '支付时间',
+    create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    pay_time DATETIME(3) DEFAULT NULL COMMENT '支付时间',
+    cancel_time DATETIME(3) DEFAULT NULL COMMENT '取消时间',
     
     PRIMARY KEY (id), -- 分布式ID作为主键
     INDEX idx_user_id (user_id),
@@ -37,7 +38,7 @@ CREATE TABLE `users` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `username` varchar(50) NOT NULL COMMENT '用户名',
   `password` varchar(255) NOT NULL COMMENT '密码哈希',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';

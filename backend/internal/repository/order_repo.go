@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"gorm.io/gorm"
 
 	"seckill/internal/model"
@@ -83,18 +85,21 @@ func (r *OrderRepository) UpdateStatus(orderID uint64, status uint8) error {
 
 // CancelOrder 取消订单（CAS 操作，只有待支付状态才能取消）
 // 返回影响行数，0 表示订单不存在或状态不是待支付
-func (r *OrderRepository) CancelOrder(orderID uint64) (int64, error) {
+func (r *OrderRepository) CancelOrder(orderID uint64, cancelTime time.Time) (int64, error) {
 	result := r.db.Model(&model.Order{}).
 		Where("id = ? AND status = 0", orderID).
-		Update("status", 2)
+		Updates(map[string]interface{}{
+			"status":      2,
+			"cancel_time": cancelTime,
+		})
 	return result.RowsAffected, result.Error
 }
 
 // Pay 支付订单
-func (r *OrderRepository) Pay(orderID uint64) error {
+func (r *OrderRepository) Pay(orderID uint64, payTime time.Time) error {
 	return r.db.Model(&model.Order{}).Where("id = ?", orderID).Updates(map[string]interface{}{
 		"status":   1,
-		"pay_time": r.db.NowFunc(),
+		"pay_time": payTime,
 	}).Error
 }
 
