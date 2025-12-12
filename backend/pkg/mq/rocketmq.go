@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apache/rocketmq-client-go/v2"
@@ -11,6 +12,7 @@ import (
 	"github.com/apache/rocketmq-client-go/v2/producer"
 
 	"seckill/internal/config"
+	"seckill/pkg/logger"
 )
 
 const (
@@ -18,15 +20,32 @@ const (
 	delayMsgBaseDelay    = 100 * time.Millisecond // 初始重试间隔
 	delayMsgMaxDelay     = 2 * time.Second        // 最大重试间隔
 	delayMsgBackoffRatio = 2                      // 退避倍数
+
+	// 批量发送配置
+	batchSize    = 100                  // 每批最大消息数
+	batchTimeout = 5 * time.Millisecond // 批量等待超时
+	bufferSize   = 100000               // 缓冲队列大小
+	senderCount  = 8                    // 发送协程数
 )
 
-var Producer rocketmq.Producer
+var (
+	Producer     rocketmq.Producer
+	msgBuffer    chan *bufferedMsg
+	stopCh       chan struct{}
+	wg           sync.WaitGroup
+	seckillTopic string
+)
+
+type bufferedMsg struct {
+	body []byte
+}
 
 func InitProducer(cfg *config.RocketMQConfig) error {
 	p, err := rocketmq.NewProducer(
 		producer.WithNameServer([]string{cfg.NameSrv}),
 		producer.WithRetry(2),
 		producer.WithGroupName("seckill_producer_group"),
+		producer.WithCreateTopicKey("TBW102"),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create producer: %w", err)
@@ -37,18 +56,104 @@ func InitProducer(cfg *config.RocketMQConfig) error {
 	}
 
 	Producer = p
+	seckillTopic = cfg.Topic
+
+	// 初始化缓冲队列和发送协程
+	msgBuffer = make(chan *bufferedMsg, bufferSize)
+	stopCh = make(chan struct{})
+
+	for i := 0; i < senderCount; i++ {
+		wg.Add(1)
+		go batchSender(i)
+	}
+
 	return nil
 }
 
-// SendSeckillMsg 发送秒杀消息
-func SendSeckillMsg(ctx context.Context, topic string, body []byte) error {
-	msg := &primitive.Message{
-		Topic: topic,
-		Body:  body,
+// batchSender 批量发送协程
+func batchSender(id int) {
+	defer wg.Done()
+
+	batch := make([]*primitive.Message, 0, batchSize)
+	ticker := time.NewTicker(batchTimeout)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			// 关闭前发送剩余消息
+			if len(batch) > 0 {
+				sendBatch(batch)
+			}
+			return
+
+		case msg := <-msgBuffer:
+			batch = append(batch, &primitive.Message{
+				Topic: seckillTopic,
+				Body:  msg.body,
+			})
+			if len(batch) >= batchSize {
+				sendBatch(batch)
+				batch = make([]*primitive.Message, 0, batchSize)
+				ticker.Reset(batchTimeout)
+			}
+
+		case <-ticker.C:
+			if len(batch) > 0 {
+				sendBatch(batch)
+				batch = make([]*primitive.Message, 0, batchSize)
+			}
+		}
+	}
+}
+
+// sendBatch 发送一批消息
+func sendBatch(msgs []*primitive.Message) {
+	if len(msgs) == 0 {
+		return
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := Producer.SendSync(ctx, msgs...)
+	if err != nil {
+		logger.Error.Printf("batch send failed: %v, count=%d", err, len(msgs))
+		// 失败的消息重新入队
+		for _, m := range msgs {
+			select {
+			case msgBuffer <- &bufferedMsg{body: m.Body}:
+			default:
+				logger.Error.Printf("buffer full, drop message")
+			}
+		}
+	}
+}
+
+// EnsureTopic 确保 topic 存在，通过发送一条空消息触发自动创建
+func EnsureTopic(ctx context.Context, topic string) error {
+	msg := &primitive.Message{
+		Topic: topic,
+		Body:  []byte("init"),
+	}
 	_, err := Producer.SendSync(ctx, msg)
 	return err
+}
+
+// SendSeckillMsg 发送秒杀消息（缓冲+批量发送，高吞吐）
+func SendSeckillMsg(ctx context.Context, topic string, body []byte) error {
+	select {
+	case msgBuffer <- &bufferedMsg{body: body}:
+		return nil
+	default:
+		// 缓冲满了，降级为同步发送
+		msg := &primitive.Message{
+			Topic: topic,
+			Body:  body,
+		}
+		_, err := Producer.SendSync(ctx, msg)
+		return err
+	}
 }
 
 // SendDelayMsg 发送延迟消息（带指数退避重试）
@@ -99,6 +204,12 @@ func isBrokerBusyError(err error) bool {
 }
 
 func CloseProducer() error {
+	// 关闭发送协程
+	if stopCh != nil {
+		close(stopCh)
+		wg.Wait()
+	}
+
 	if Producer != nil {
 		return Producer.Shutdown()
 	}

@@ -120,8 +120,9 @@ func RollbackStock(ctx context.Context, goodsID uint64, segmentID int, userID ui
 	return err
 }
 
-// CheckAndMark 检查用户资格并标记（不扣库存）
-// 返回: SeckillResult, 有库存的分段索引
+// CheckAndMark 检查用户资格、标记用户、扣减库存（原子操作）
+// Redis 扣库存成功 = 秒杀成功
+// 返回: SeckillResult, 扣减的分段索引
 func CheckAndMark(ctx context.Context, goodsID, userID uint64) (SeckillResult, int, error) {
 	// 构建分段 keys
 	keys := make([]string, SegmentCount+1)
@@ -152,20 +153,19 @@ func CheckAndMark(ctx context.Context, goodsID, userID uint64) (SeckillResult, i
 	return SeckillResult(result), 0, nil
 }
 
-// DecrStock Consumer 端扣减库存
-// 返回: 1=成功, 0=库存不足, -1=用户未标记, -2=已扣过库存
-func DecrStock(ctx context.Context, goodsID uint64, segmentID int, userID uint64) (int, error) {
-	segmentKey := SegmentStockKey(goodsID, segmentID)
+// CheckProcessed Consumer 端幂等检查（库存已在 API 层扣减）
+// 返回: 1=成功可创建订单, -1=用户未标记, -2=已处理过
+func CheckProcessed(ctx context.Context, goodsID, userID uint64) (int, error) {
 	boughtKey := BoughtKey(goodsID)
-	deductedKey := DeductedKey(goodsID)
+	processedKey := ProcessedKey(goodsID)
 
-	result, err := Client.EvalSha(ctx, seckillDecrSHA, []string{segmentKey, boughtKey, deductedKey}, userID).Int()
+	result, err := Client.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID).Int()
 	if err != nil {
 		if err == redis.Nil || err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
 			if loadErr := LoadScript(ctx); loadErr != nil {
 				return -99, loadErr
 			}
-			result, err = Client.EvalSha(ctx, seckillDecrSHA, []string{segmentKey, boughtKey, deductedKey}, userID).Int()
+			result, err = Client.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID).Int()
 		}
 		if err != nil {
 			return -99, err
@@ -187,8 +187,14 @@ func SetUserStatus(ctx context.Context, goodsID, userID uint64, status int) erro
 	return Client.HSet(ctx, boughtKey, fmt.Sprintf("%d", userID), status).Err()
 }
 
-// ClearUserDeducted 清除用户已扣库存标记
+// ClearUserDeducted 清除用户已扣库存标记（废弃）
 func ClearUserDeducted(ctx context.Context, goodsID, userID uint64) error {
 	deductedKey := DeductedKey(goodsID)
 	return Client.SRem(ctx, deductedKey, userID).Err()
+}
+
+// ClearProcessed 清除用户已处理标记（允许重试）
+func ClearProcessed(ctx context.Context, goodsID, userID uint64) error {
+	processedKey := ProcessedKey(goodsID)
+	return Client.SRem(ctx, processedKey, userID).Err()
 }

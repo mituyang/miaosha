@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS orders (
     goods_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
     pay_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '支付金额',
     status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '订单状态: 0-未支付, 1-已支付, 2-已取消',
-    create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    request_time DATETIME(3) NOT NULL COMMENT '用户请求时间',
+    create_time DATETIME(3) NOT NULL COMMENT 'Redis确认时间(订单创建时间)',
     pay_time DATETIME(3) DEFAULT NULL COMMENT '支付时间',
     cancel_time DATETIME(3) DEFAULT NULL COMMENT '取消时间',
     
@@ -45,5 +46,5 @@ CREATE TABLE `users` (
 
 -- 插入测试数据
 INSERT INTO goods (product_name, stock, price, version) VALUES 
-('iPhone 15 Pro', 100, 6999.00, 0),
+('iPhone 15 Pro', 10000, 6999.00, 0),
 ('MacBook Pro M3', 50, 12999.00, 0);

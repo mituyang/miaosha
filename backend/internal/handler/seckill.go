@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -21,6 +22,9 @@ func NewSeckillHandler(svc *service.SeckillService) *SeckillHandler {
 // DoSeckill 秒杀接口
 // POST /api/seckill/buy
 func (h *SeckillHandler) DoSeckill(c *gin.Context) {
+	// 记录用户请求时间
+	requestTime := time.Now()
+
 	var req dto.SeckillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, util.Error(util.CodeParamError, "参数错误"))
@@ -30,7 +34,7 @@ func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 	// 从 JWT 中间件获取 user_id
 	userID := c.GetUint64("user_id")
 
-	result, err := h.svc.DoSeckill(c.Request.Context(), userID, req.GoodsID)
+	result, err := h.svc.DoSeckill(c.Request.Context(), userID, req.GoodsID, requestTime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
 		return

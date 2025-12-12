@@ -215,51 +215,47 @@ func isDuplicateKeyError(err error) bool {
 func (c *Consumer) createOrder(ctx context.Context, msg *dto.SeckillMessage) error {
 	userID, goodsID, segmentID := msg.UserID, msg.GoodsID, msg.SegmentID
 
-	// 1. 扣减 Redis 库存
-	decrResult, err := redis.DecrStock(ctx, goodsID, segmentID, userID)
+	// 1. 幂等检查（库存已在 API 层扣减）
+	checkResult, err := redis.CheckProcessed(ctx, goodsID, userID)
 	if err != nil {
-		return fmt.Errorf("decr redis stock failed: %w", err)
+		return fmt.Errorf("check processed failed: %w", err)
 	}
 
-	switch decrResult {
-	case 0:
-		// Redis 库存不足，清除用户标记
-		_ = redis.ClearUserBought(ctx, goodsID, userID)
-		return nil
+	switch checkResult {
 	case -1:
-		// 用户未标记，可能是重复消费，检查是否已有订单
-		exists, _ := c.orderRepo.ExistsByUserAndGoods(userID, goodsID)
-		if exists {
-			return nil // 已有订单，幂等处理
-		}
-		// 异常情况，记录日志
-		logger.Error.Printf("user not marked but no order: userID=%d, goodsID=%d", userID, goodsID)
+		// 用户未标记，异常情况（不应该收到这个消息）
+		logger.Error.Printf("user not marked: userID=%d, goodsID=%d", userID, goodsID)
 		return nil
 	case -2:
-		// 已扣过库存，重复消费，幂等处理
+		// 已处理过，重复消费，幂等返回
 		return nil
 	}
 
 	// 2. 查询商品（获取价格）
 	goods, err := c.goodsRepo.GetByID(goodsID)
 	if err != nil {
-		// 回滚 Redis 库存
-		_ = redis.RollbackStock(ctx, goodsID, segmentID, userID)
+		// 清除已处理标记，允许重试
+		_ = redis.ClearProcessed(ctx, goodsID, userID)
 		return fmt.Errorf("get goods failed: %w", err)
 	}
 
 	// 3. 构建订单
+	requestTime := time.Now()
 	createTime := time.Now()
 	if msg.RequestTime > 0 {
-		createTime = time.UnixMilli(msg.RequestTime)
+		requestTime = time.UnixMilli(msg.RequestTime)
+	}
+	if msg.CreateTime > 0 {
+		createTime = time.UnixMilli(msg.CreateTime)
 	}
 	order := &model.Order{
-		ID:         util.NextID(),
-		UserID:     userID,
-		GoodsID:    goodsID,
-		PayAmount:  goods.Price,
-		Status:     0,
-		CreateTime: createTime,
+		ID:          util.NextID(),
+		UserID:      userID,
+		GoodsID:     goodsID,
+		PayAmount:   goods.Price,
+		Status:      0,
+		RequestTime: requestTime,
+		CreateTime:  createTime,
 	}
 
 	// 4. 使用事务：扣 MySQL 库存 + 创建订单
@@ -281,19 +277,17 @@ func (c *Consumer) createOrder(ctx context.Context, msg *dto.SeckillMessage) err
 	// 5. 处理事务结果
 	if err != nil {
 		if errors.Is(err, ErrStockNotEnough) {
-			// MySQL 库存不足，回滚 Redis
-			_ = redis.RollbackStock(ctx, goodsID, segmentID, userID)
+			// MySQL 库存不足（Redis 库存已扣，这是异常情况）
+			logger.Error.Printf("MySQL stock not enough but Redis deducted: userID=%d, goodsID=%d", userID, goodsID)
 			return nil
 		}
 		if isDuplicateKeyError(err) {
-			// 重复消费，幂等处理（Redis 库存已扣，但订单已存在）
-			// 需要回滚 Redis 库存
-			_ = redis.RollbackStock(ctx, goodsID, segmentID, userID)
+			// 重复消费，幂等处理
 			logger.Info.Printf("duplicate order detected: userID=%d, goodsID=%d", userID, goodsID)
 			return nil
 		}
-		// 其他错误，回滚 Redis 并重试消息
-		_ = redis.RollbackStock(ctx, goodsID, segmentID, userID)
+		// 其他错误，清除已处理标记，允许重试
+		_ = redis.ClearProcessed(ctx, goodsID, userID)
 		return err
 	}
 
@@ -356,7 +350,7 @@ func (c *Consumer) checkAndCancelOrder(ctx context.Context, msg dto.OrderTimeout
 
 	// 清除用户标记，允许重新抢购
 	_ = redis.ClearUserBought(ctx, msg.GoodsID, msg.UserID)
-	_ = redis.ClearUserDeducted(ctx, msg.GoodsID, msg.UserID)
+	_ = redis.ClearProcessed(ctx, msg.GoodsID, msg.UserID)
 
 	logger.Info.Printf("order cancelled: orderID=%d", msg.OrderID)
 	return nil

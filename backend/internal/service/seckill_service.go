@@ -36,12 +36,15 @@ func NewSeckillService(cfg *config.Config) *SeckillService {
 }
 
 // DoSeckill 秒杀核心逻辑: 检查资格 -> 发MQ -> Consumer扣库存
-func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64) (Result, error) {
+func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, requestTime time.Time) (Result, error) {
 	// 1. 检查用户资格并标记（不扣库存）
 	result, segmentID, err := redis.CheckAndMark(ctx, goodsID, userID)
 	if err != nil {
 		return ResultError, err
 	}
+
+	// Redis 确认时间
+	createTime := time.Now()
 
 	// 2. 根据 Lua 脚本返回值判断
 	switch result {
@@ -55,7 +58,8 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64) 
 			UserID:      userID,
 			GoodsID:     goodsID,
 			SegmentID:   segmentID,
-			RequestTime: time.Now().UnixMilli(),
+			RequestTime: requestTime.UnixMilli(),
+			CreateTime:  createTime.UnixMilli(),
 		}
 		body, _ := json.Marshal(msg)
 
