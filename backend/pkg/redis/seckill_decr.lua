@@ -1,13 +1,13 @@
 -- 秒杀库存扣减脚本（Consumer 端使用）
 -- KEYS[1]: 分段库存 key
--- KEYS[2]: 已购用户集合 key (标记)
+-- KEYS[2]: 已购用户 Hash key (标记)
 -- KEYS[3]: 已扣库存用户集合 key (防重复扣减)
 -- ARGV[1]: 用户ID
 
 -- 返回值:
 -- 1: 成功
 -- 0: 库存不足
--- -1: 用户未标记（异常情况）
+-- -1: 用户未标记或已取消（异常情况）
 -- -2: 已扣过库存（重复消费）
 
 local segmentKey = KEYS[1]
@@ -15,8 +15,9 @@ local boughtKey = KEYS[2]
 local deductedKey = KEYS[3]
 local userId = ARGV[1]
 
--- 1. 检查用户是否已标记
-if redis.call('SISMEMBER', boughtKey, userId) == 0 then
+-- 1. 检查用户是否已标记且状态为待支付
+local status = redis.call('HGET', boughtKey, userId)
+if not status or tonumber(status) ~= 0 then
     return -1
 end
 

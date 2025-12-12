@@ -8,13 +8,13 @@ mysql:
   username: root
   password: root123
   max_open_conns: 100
-  max_idle_conns: 10
+  max_idle_conns: 50
 
 redis:
   addr: redis:6379
   password: ""
   db: 0
-  pool_size: 500
+  pool_size: 200
 
 rocketmq:
   namesrv: 172.28.0.10:9876

@@ -75,7 +75,7 @@ func IncrStock(ctx context.Context, goodsID uint64) error {
 // ClearUserBought 清除用户购买记录 (订单取消时允许重新抢购)
 func ClearUserBought(ctx context.Context, goodsID, userID uint64) error {
 	boughtKey := BoughtKey(goodsID)
-	return Client.SRem(ctx, boughtKey, userID).Err()
+	return Client.HDel(ctx, boughtKey, fmt.Sprintf("%d", userID)).Err()
 }
 
 // AcquireWarmupLock 获取预热分布式锁

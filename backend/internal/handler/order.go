@@ -39,7 +39,7 @@ func (h *OrderHandler) PayOrder(c *gin.Context) {
 		return
 	}
 
-	if err := h.orderSvc.PayOrder(orderID, userID); err != nil {
+	if err := h.orderSvc.PayOrder(c.Request.Context(), orderID, userID); err != nil {
 		if err == service.ErrOrderStatusInvalid {
 			c.JSON(http.StatusBadRequest, util.Error(util.CodeParamError, "订单状态不允许支付"))
 			return

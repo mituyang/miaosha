@@ -9,14 +9,14 @@ mysql:
   database: seckill
   username: root
   password: root123
-  max_open_conns: 100
-  max_idle_conns: 10
+  max_open_conns: 1000
+  max_idle_conns: 1000
 
 redis:
   addr: 127.0.0.1:6379
   password: ""
   db: 0
-  pool_size: 500
+  pool_size: 1000
 
 rocketmq:
   namesrv: 127.0.0.1:9876

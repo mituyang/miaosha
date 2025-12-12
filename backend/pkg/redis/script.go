@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"math/rand"
 
 	"github.com/redis/go-redis/v9"
@@ -109,10 +110,11 @@ func RollbackStock(ctx context.Context, goodsID uint64, segmentID int, userID ui
 	segmentKey := SegmentStockKey(goodsID, segmentID)
 	boughtKey := BoughtKey(goodsID)
 	deductedKey := DeductedKey(goodsID)
+	userIDStr := fmt.Sprintf("%d", userID)
 
 	pipe := Client.Pipeline()
 	pipe.Incr(ctx, segmentKey)
-	pipe.SRem(ctx, boughtKey, userID)
+	pipe.HDel(ctx, boughtKey, userIDStr)
 	pipe.SRem(ctx, deductedKey, userID)
 	_, err := pipe.Exec(ctx)
 	return err
@@ -175,5 +177,18 @@ func DecrStock(ctx context.Context, goodsID uint64, segmentID int, userID uint64
 // ClearUserMark 清除用户标记（MQ 发送失败时调用）
 func ClearUserMark(ctx context.Context, goodsID, userID uint64) error {
 	boughtKey := BoughtKey(goodsID)
-	return Client.SRem(ctx, boughtKey, userID).Err()
+	return Client.HDel(ctx, boughtKey, fmt.Sprintf("%d", userID)).Err()
+}
+
+// SetUserStatus 设置用户订单状态
+// status: 0=待支付, 1=已支付, 2=已取消
+func SetUserStatus(ctx context.Context, goodsID, userID uint64, status int) error {
+	boughtKey := BoughtKey(goodsID)
+	return Client.HSet(ctx, boughtKey, fmt.Sprintf("%d", userID), status).Err()
+}
+
+// ClearUserDeducted 清除用户已扣库存标记
+func ClearUserDeducted(ctx context.Context, goodsID, userID uint64) error {
+	deductedKey := DeductedKey(goodsID)
+	return Client.SRem(ctx, deductedKey, userID).Err()
 }

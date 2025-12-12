@@ -28,7 +28,7 @@ func (s *OrderService) GetUserOrders(userID uint64) ([]repository.OrderWithGoods
 }
 
 // PayOrder 支付订单
-func (s *OrderService) PayOrder(orderID, userID uint64) error {
+func (s *OrderService) PayOrder(ctx context.Context, orderID, userID uint64) error {
 	order, err := s.orderRepo.FindByIDAndUserID(orderID, userID)
 	if err != nil {
 		return err
@@ -36,7 +36,12 @@ func (s *OrderService) PayOrder(orderID, userID uint64) error {
 	if order.Status != 0 {
 		return ErrOrderStatusInvalid
 	}
-	return s.orderRepo.Pay(orderID, time.Now())
+	if err := s.orderRepo.Pay(orderID, time.Now()); err != nil {
+		return err
+	}
+	// 更新 Redis 状态为已支付
+	_ = redis.SetUserStatus(ctx, order.GoodsID, userID, 1)
+	return nil
 }
 
 // CancelOrder 取消订单并返还库存
@@ -66,6 +71,9 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 
 	// 4. 清除用户购买记录 (允许重新抢购)
 	_ = redis.ClearUserBought(ctx, order.GoodsID, userID)
+
+	// 5. 清除已扣库存标记
+	_ = redis.ClearUserDeducted(ctx, order.GoodsID, userID)
 
 	return nil
 }

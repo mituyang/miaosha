@@ -34,7 +34,7 @@ const (
 
 	// 超时消息队列配置
 	timeoutMsgQueueSize  = 10000           // 队列容量
-	timeoutMsgSendRate   = 500             // 每秒发送数量
+	timeoutMsgSendRate   = 5000            // 每秒发送数量
 	timeoutMsgRetryDelay = 5 * time.Second // 发送失败重试间隔
 	timeoutMsgMaxRetries = 10              // 单条消息最大重试次数
 )
@@ -68,6 +68,15 @@ func NewConsumer(cfg *config.Config) *Consumer {
 func (c *Consumer) Start() error {
 	if err := mq.InitProducer(&c.cfg.RocketMQ); err != nil {
 		return fmt.Errorf("init producer failed: %w", err)
+	}
+
+	// 确保 topic 存在（通过发送消息触发自动创建）
+	ctx := context.Background()
+	if err := mq.EnsureTopic(ctx, c.cfg.RocketMQ.Topic); err != nil {
+		logger.Info.Printf("ensure topic %s: %v (may already exist)", c.cfg.RocketMQ.Topic, err)
+	}
+	if err := mq.EnsureTopic(ctx, TopicOrderTimeout); err != nil {
+		logger.Info.Printf("ensure topic %s: %v (may already exist)", TopicOrderTimeout, err)
 	}
 
 	pc, err := rocketmq.NewPushConsumer(
@@ -342,9 +351,12 @@ func (c *Consumer) checkAndCancelOrder(ctx context.Context, msg dto.OrderTimeout
 	}
 
 	// 返还库存（订单确实被取消了才返还）
-	// 注意：不清除用户标记，防止用户重复抢购导致库存不一致
 	_ = c.goodsRepo.IncrStock(msg.GoodsID)
 	_ = redis.IncrSegmentStock(ctx, msg.GoodsID, msg.SegmentID)
+
+	// 清除用户标记，允许重新抢购
+	_ = redis.ClearUserBought(ctx, msg.GoodsID, msg.UserID)
+	_ = redis.ClearUserDeducted(ctx, msg.GoodsID, msg.UserID)
 
 	logger.Info.Printf("order cancelled: orderID=%d", msg.OrderID)
 	return nil
