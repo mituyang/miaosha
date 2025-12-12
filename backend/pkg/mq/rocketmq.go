@@ -71,7 +71,7 @@ func InitProducer(cfg *config.RocketMQConfig) error {
 }
 
 // batchSender 批量发送协程
-func batchSender(id int) {
+func batchSender(_ int) {
 	defer wg.Done()
 
 	batch := make([]*primitive.Message, 0, batchSize)
@@ -185,6 +185,40 @@ func SendDelayMsg(ctx context.Context, topic string, body []byte, delayLevel int
 			delay = delayMsgMaxDelay
 		}
 		// 检查 context 是否已取消
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	return lastErr
+}
+
+// SendTimerMsg 发送定时消息（指定精确投递时间，RocketMQ 5.x）
+// deliverTime: 消息投递的精确时间
+func SendTimerMsg(ctx context.Context, topic string, body []byte, deliverTime time.Time) error {
+	msg := &primitive.Message{
+		Topic: topic,
+		Body:  body,
+	}
+	// RocketMQ 5.x 定时消息：使用 TIMER_DELIVER_MS 设置投递时间戳（毫秒）
+	msg.WithProperty("TIMER_DELIVER_MS", fmt.Sprintf("%d", deliverTime.UnixMilli()))
+
+	var lastErr error
+	delay := delayMsgBaseDelay
+
+	for range delayMsgMaxRetries {
+		_, err := Producer.SendSync(ctx, msg)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isBrokerBusyError(err) {
+			return err
+		}
+		time.Sleep(delay)
+		delay *= delayMsgBackoffRatio
+		if delay > delayMsgMaxDelay {
+			delay = delayMsgMaxDelay
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

@@ -26,7 +26,6 @@ import (
 
 const (
 	TopicOrderTimeout = "order_timeout"
-	DelayLevel1Min    = 5
 
 	// 超时消费者重试配置
 	timeoutConsumerMaxRetries = 5
@@ -37,13 +36,17 @@ const (
 	timeoutMsgSendRate   = 5000            // 每秒发送数量
 	timeoutMsgRetryDelay = 5 * time.Second // 发送失败重试间隔
 	timeoutMsgMaxRetries = 10              // 单条消息最大重试次数
+
+	// 默认订单超时时间（秒）
+	defaultOrderTimeoutSeconds = 60
 )
 
 // timeoutMsgItem 超时消息队列项
 type timeoutMsgItem struct {
-	body    []byte
-	orderID uint64
-	retries int
+	body        []byte
+	orderID     uint64
+	deliverTime time.Time // 精确投递时间
+	retries     int
 }
 
 // 全局超时消息队列
@@ -122,7 +125,8 @@ func (c *Consumer) startTimeoutMsgSender() {
 	for item := range timeoutMsgQueue {
 		<-ticker.C // 限速
 
-		err := mq.SendDelayMsg(context.Background(), TopicOrderTimeout, item.body, DelayLevel1Min)
+		// 使用定时消息，指定精确投递时间
+		err := mq.SendTimerMsg(context.Background(), TopicOrderTimeout, item.body, item.deliverTime)
 		if err != nil {
 			item.retries++
 			if item.retries < timeoutMsgMaxRetries {
@@ -291,7 +295,14 @@ func (c *Consumer) createOrder(ctx context.Context, msg *dto.SeckillMessage) err
 		return err
 	}
 
-	// 6. 超时消息入队（由后台协程限速发送）
+	// 6. 计算精确的超时投递时间（从 createTime 开始计算）
+	timeoutSeconds := c.cfg.RocketMQ.OrderTimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = defaultOrderTimeoutSeconds
+	}
+	deliverTime := createTime.Add(time.Duration(timeoutSeconds) * time.Second)
+
+	// 7. 超时消息入队（由后台协程限速发送）
 	timeoutMsg := dto.OrderTimeoutMessage{
 		OrderID:   order.ID,
 		UserID:    userID,
@@ -300,14 +311,14 @@ func (c *Consumer) createOrder(ctx context.Context, msg *dto.SeckillMessage) err
 	}
 	body, _ := json.Marshal(timeoutMsg)
 	select {
-	case timeoutMsgQueue <- &timeoutMsgItem{body: body, orderID: order.ID, retries: 0}:
+	case timeoutMsgQueue <- &timeoutMsgItem{body: body, orderID: order.ID, deliverTime: deliverTime, retries: 0}:
 	default:
 		// 队列满，直接尝试发送（降级处理）
-		go func(orderID uint64, msgBody []byte) {
-			if err := mq.SendDelayMsg(context.Background(), TopicOrderTimeout, msgBody, DelayLevel1Min); err != nil {
+		go func(orderID uint64, msgBody []byte, dt time.Time) {
+			if err := mq.SendTimerMsg(context.Background(), TopicOrderTimeout, msgBody, dt); err != nil {
 				logger.Error.Printf("send timeout message failed (queue full): orderID=%d, err=%v", orderID, err)
 			}
-		}(order.ID, body)
+		}(order.ID, body, deliverTime)
 	}
 
 	return nil

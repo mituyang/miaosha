@@ -46,9 +46,10 @@ type RedisConfig struct {
 }
 
 type RocketMQConfig struct {
-	NameSrv string `yaml:"namesrv"`
-	Topic   string `yaml:"topic"`
-	Group   string `yaml:"group"`
+	NameSrv             string `yaml:"namesrv"`
+	Topic               string `yaml:"topic"`
+	Group               string `yaml:"group"`
+	OrderTimeoutSeconds int    `yaml:"order_timeout_seconds"` // 订单超时时间（秒），默认60
 }
 
 var Cfg *Config

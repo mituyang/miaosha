@@ -22,6 +22,7 @@ rocketmq:
   namesrv: 127.0.0.1:9876
   topic: seckill_order
   group: seckill_consumer_group
+  order_timeout_seconds: 60  # 订单超时时间（秒）
 
 jwt:
   secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="
