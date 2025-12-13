@@ -75,6 +75,9 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 	// 5. 清除已扣库存标记
 	_ = redis.ClearUserDeducted(ctx, order.GoodsID, userID)
 
+	// 6. 清除已处理标记 (允许重新抢购)
+	_ = redis.ClearProcessed(ctx, order.GoodsID, userID)
+
 	return nil
 }
 
