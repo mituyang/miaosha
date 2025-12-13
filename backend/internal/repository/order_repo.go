@@ -110,3 +110,11 @@ func (r *OrderRepository) BatchCreate(orders []*model.Order) error {
 	}
 	return r.db.CreateInBatches(orders, 100).Error
 }
+
+// BatchCreateWithTx 在事务中批量创建订单
+func (r *OrderRepository) BatchCreateWithTx(tx *gorm.DB, orders []*model.Order) error {
+	if len(orders) == 0 {
+		return nil
+	}
+	return tx.CreateInBatches(orders, 100).Error
+}

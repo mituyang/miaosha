@@ -102,3 +102,30 @@ func (r *GoodsRepository) DecrStockWithTx(tx *gorm.DB, id uint64) (int64, error)
 		Update("stock", gorm.Expr("stock - 1"))
 	return result.RowsAffected, result.Error
 }
+
+// DecrStockBatchWithTx 在事务中批量扣减库存
+// 返回实际扣减的数量
+func (r *GoodsRepository) DecrStockBatchWithTx(tx *gorm.DB, id uint64, count int) (int64, error) {
+	// 先查询当前库存（加行锁）
+	var goods model.Goods
+	if err := tx.Set("gorm:query_option", "FOR UPDATE").First(&goods, id).Error; err != nil {
+		return 0, err
+	}
+
+	// 计算实际可扣减数量
+	actualCount := min(count, int(goods.Stock))
+	if actualCount == 0 {
+		return 0, nil
+	}
+
+	// 扣减库存
+	result := tx.Model(&model.Goods{}).
+		Where("id = ?", id).
+		Update("stock", gorm.Expr("stock - ?", actualCount))
+
+	if result.Error != nil {
+		return 0, result.Error
+	}
+
+	return int64(actualCount), nil
+}

@@ -9,7 +9,7 @@ const (
 	deductedKeyPrefix  = keyPrefix + "deducted:"  // 已扣库存用户集合（废弃，保留兼容）
 	processedKeyPrefix = keyPrefix + "processed:" // 已处理用户集合（Consumer 幂等）
 	segmentKeyPrefix   = keyPrefix + "segment:"   // 分段库存
-	SegmentCount       = 10                       // 库存分段数量
+	SegmentCount       = 1                        // 库存分段数量
 )
 
 // StockKey 库存 key: seckill:stock:{goodsID}

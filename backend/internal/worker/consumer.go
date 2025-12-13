@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apache/rocketmq-client-go/v2"
@@ -39,6 +40,10 @@ const (
 
 	// 默认订单超时时间（秒）
 	defaultOrderTimeoutSeconds = 60
+
+	// 批量写入配置
+	batchFlushInterval = 100 * time.Millisecond // 批量刷盘间隔
+	batchQueueSize     = 10000                  // 批量队列容量
 )
 
 // timeoutMsgItem 超时消息队列项
@@ -49,8 +54,17 @@ type timeoutMsgItem struct {
 	retries     int
 }
 
+// orderBatchItem 订单批量写入队列项
+type orderBatchItem struct {
+	msg   *dto.SeckillMessage
+	goods *model.Goods
+}
+
 // 全局超时消息队列
 var timeoutMsgQueue = make(chan *timeoutMsgItem, timeoutMsgQueueSize)
+
+// 全局订单批量写入队列
+var orderBatchQueue = make(chan *orderBatchItem, batchQueueSize)
 
 type Consumer struct {
 	cfg             *config.Config
@@ -58,6 +72,8 @@ type Consumer struct {
 	timeoutConsumer rocketmq.PushConsumer
 	goodsRepo       *repository.GoodsRepository
 	orderRepo       *repository.OrderRepository
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
 }
 
 func NewConsumer(cfg *config.Config) *Consumer {
@@ -65,6 +81,7 @@ func NewConsumer(cfg *config.Config) *Consumer {
 		cfg:       cfg,
 		goodsRepo: repository.NewGoodsRepository(database.DB),
 		orderRepo: repository.NewOrderRepository(database.DB),
+		stopChan:  make(chan struct{}),
 	}
 }
 
@@ -108,6 +125,10 @@ func (c *Consumer) Start() error {
 
 	// 启动超时消息发送协程
 	go c.startTimeoutMsgSender()
+
+	// 启动批量写入协程
+	c.wg.Add(1)
+	go c.startBatchWriter()
 
 	logger.Info.Printf("Consumer started")
 	return nil
@@ -197,8 +218,8 @@ func (c *Consumer) handleMessage(ctx context.Context, msgs ...*primitive.Message
 			continue
 		}
 
-		if err := c.createOrder(ctx, &seckillMsg); err != nil {
-			logger.Error.Printf("create order failed: userID=%d, goodsID=%d, err=%v",
+		if err := c.enqueueOrder(ctx, &seckillMsg); err != nil {
+			logger.Error.Printf("enqueue order failed: userID=%d, goodsID=%d, err=%v",
 				seckillMsg.UserID, seckillMsg.GoodsID, err)
 			return consumer.ConsumeRetryLater, nil
 		}
@@ -216,10 +237,11 @@ func isDuplicateKeyError(err error) bool {
 		strings.Contains(err.Error(), "Duplicate entry")
 }
 
-func (c *Consumer) createOrder(ctx context.Context, msg *dto.SeckillMessage) error {
-	userID, goodsID, segmentID := msg.UserID, msg.GoodsID, msg.SegmentID
+// enqueueOrder 将订单入队，等待批量写入
+func (c *Consumer) enqueueOrder(ctx context.Context, msg *dto.SeckillMessage) error {
+	userID, goodsID := msg.UserID, msg.GoodsID
 
-	// 1. 幂等检查（库存已在 API 层扣减）
+	// 1. 幂等检查
 	checkResult, err := redis.CheckProcessed(ctx, goodsID, userID)
 	if err != nil {
 		return fmt.Errorf("check processed failed: %w", err)
@@ -227,101 +249,172 @@ func (c *Consumer) createOrder(ctx context.Context, msg *dto.SeckillMessage) err
 
 	switch checkResult {
 	case -1:
-		// 用户未标记，异常情况（不应该收到这个消息）
 		logger.Error.Printf("user not marked: userID=%d, goodsID=%d", userID, goodsID)
 		return nil
 	case -2:
-		// 已处理过，重复消费，幂等返回
 		return nil
 	}
 
 	// 2. 查询商品（获取价格）
 	goods, err := c.goodsRepo.GetByID(goodsID)
 	if err != nil {
-		// 清除已处理标记，允许重试
 		_ = redis.ClearProcessed(ctx, goodsID, userID)
 		return fmt.Errorf("get goods failed: %w", err)
 	}
 
-	// 3. 构建订单
-	requestTime := time.Now()
-	createTime := time.Now()
-	if msg.RequestTime > 0 {
-		requestTime = time.UnixMilli(msg.RequestTime)
+	// 3. 入队等待批量写入
+	select {
+	case orderBatchQueue <- &orderBatchItem{msg: msg, goods: goods}:
+		return nil
+	default:
+		// 队列满，清除标记允许重试
+		_ = redis.ClearProcessed(ctx, goodsID, userID)
+		return fmt.Errorf("order batch queue full")
 	}
-	if msg.CreateTime > 0 {
-		createTime = time.UnixMilli(msg.CreateTime)
+}
+
+// startBatchWriter 启动批量写入协程
+func (c *Consumer) startBatchWriter() {
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(batchFlushInterval)
+	defer ticker.Stop()
+
+	batch := make([]*orderBatchItem, 0, 1000)
+
+	for {
+		select {
+		case <-c.stopChan:
+			// 停止前刷盘剩余数据
+			if len(batch) > 0 {
+				c.flushBatch(batch)
+			}
+			return
+		case item := <-orderBatchQueue:
+			batch = append(batch, item)
+		case <-ticker.C:
+			if len(batch) > 0 {
+				c.flushBatch(batch)
+				batch = make([]*orderBatchItem, 0, 1000)
+			}
+		}
 	}
-	order := &model.Order{
-		ID:          util.NextID(),
-		UserID:      userID,
-		GoodsID:     goodsID,
-		PayAmount:   goods.Price,
-		Status:      0,
-		RequestTime: requestTime,
-		CreateTime:  createTime,
+}
+
+// flushBatch 批量写入 MySQL
+func (c *Consumer) flushBatch(batch []*orderBatchItem) {
+	if len(batch) == 0 {
+		return
 	}
 
-	// 4. 使用事务：扣 MySQL 库存 + 创建订单
-	err = c.orderRepo.GetDB().Transaction(func(tx *gorm.DB) error {
-		affected, err := c.goodsRepo.DecrStockWithTx(tx, goodsID)
-		if err != nil {
-			return fmt.Errorf("decr stock failed: %w", err)
+	// 按商品ID分组，减少锁竞争
+	groupByGoods := make(map[uint64][]*orderBatchItem)
+	for _, item := range batch {
+		groupByGoods[item.msg.GoodsID] = append(groupByGoods[item.msg.GoodsID], item)
+	}
+
+	// 逐个商品处理
+	for goodsID, items := range groupByGoods {
+		c.flushGoodsBatch(goodsID, items)
+	}
+}
+
+// flushGoodsBatch 批量写入单个商品的订单
+func (c *Consumer) flushGoodsBatch(goodsID uint64, items []*orderBatchItem) {
+	ctx := context.Background()
+
+	// 构建订单列表
+	orders := make([]*model.Order, 0, len(items))
+	for _, item := range items {
+		msg := item.msg
+		requestTime := time.Now()
+		createTime := time.Now()
+		if msg.RequestTime > 0 {
+			requestTime = time.UnixMilli(msg.RequestTime)
 		}
+		if msg.CreateTime > 0 {
+			createTime = time.UnixMilli(msg.CreateTime)
+		}
+		orders = append(orders, &model.Order{
+			ID:          util.NextID(),
+			UserID:      msg.UserID,
+			GoodsID:     goodsID,
+			PayAmount:   item.goods.Price,
+			Status:      0,
+			RequestTime: requestTime,
+			CreateTime:  createTime,
+		})
+	}
+
+	// 事务：批量扣库存 + 批量创建订单
+	var affected int64
+	err := c.orderRepo.GetDB().Transaction(func(tx *gorm.DB) error {
+		// 批量扣减库存（带行锁）
+		var err error
+		affected, err = c.goodsRepo.DecrStockBatchWithTx(tx, goodsID, len(orders))
+		if err != nil {
+			return fmt.Errorf("batch decr stock failed: %w", err)
+		}
+
+		// 只创建成功扣减库存数量的订单
 		if affected == 0 {
 			return ErrStockNotEnough
 		}
+		if int(affected) < len(orders) {
+			orders = orders[:affected]
+		}
 
-		if err := c.orderRepo.CreateWithTx(tx, order); err != nil {
-			return fmt.Errorf("create order failed: %w", err)
+		// 批量创建订单
+		if err := c.orderRepo.BatchCreateWithTx(tx, orders); err != nil {
+			return fmt.Errorf("batch create orders failed: %w", err)
 		}
 		return nil
 	})
 
-	// 5. 处理事务结果
+	// 处理结果
 	if err != nil {
 		if errors.Is(err, ErrStockNotEnough) {
-			// MySQL 库存不足（Redis 库存已扣，这是异常情况）
-			logger.Error.Printf("MySQL stock not enough but Redis deducted: userID=%d, goodsID=%d", userID, goodsID)
-			return nil
+			logger.Error.Printf("MySQL stock not enough: goodsID=%d, count=%d", goodsID, len(items))
+		} else if !isDuplicateKeyError(err) {
+			// 非幂等错误，清除标记允许重试
+			for _, item := range items {
+				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID)
+			}
+			logger.Error.Printf("batch write failed: goodsID=%d, err=%v", goodsID, err)
 		}
-		if isDuplicateKeyError(err) {
-			// 重复消费，幂等处理
-			logger.Info.Printf("duplicate order detected: userID=%d, goodsID=%d", userID, goodsID)
-			return nil
-		}
-		// 其他错误，清除已处理标记，允许重试
-		_ = redis.ClearProcessed(ctx, goodsID, userID)
-		return err
+		return
 	}
 
-	// 6. 计算精确的超时投递时间（从 createTime 开始计算）
+	// 发送超时消息
 	timeoutSeconds := c.cfg.RocketMQ.OrderTimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = defaultOrderTimeoutSeconds
 	}
-	deliverTime := createTime.Add(time.Duration(timeoutSeconds) * time.Second)
 
-	// 7. 超时消息入队（由后台协程限速发送）
-	timeoutMsg := dto.OrderTimeoutMessage{
-		OrderID:   order.ID,
-		UserID:    userID,
-		GoodsID:   goodsID,
-		SegmentID: segmentID,
-	}
-	body, _ := json.Marshal(timeoutMsg)
-	select {
-	case timeoutMsgQueue <- &timeoutMsgItem{body: body, orderID: order.ID, deliverTime: deliverTime, retries: 0}:
-	default:
-		// 队列满，直接尝试发送（降级处理）
-		go func(orderID uint64, msgBody []byte, dt time.Time) {
-			if err := mq.SendTimerMsg(context.Background(), TopicOrderTimeout, msgBody, dt); err != nil {
-				logger.Error.Printf("send timeout message failed (queue full): orderID=%d, err=%v", orderID, err)
-			}
-		}(order.ID, body, deliverTime)
+	for i, order := range orders {
+		item := items[i]
+		deliverTime := order.CreateTime.Add(time.Duration(timeoutSeconds) * time.Second)
+
+		timeoutMsg := dto.OrderTimeoutMessage{
+			OrderID:   order.ID,
+			UserID:    item.msg.UserID,
+			GoodsID:   goodsID,
+			SegmentID: item.msg.SegmentID,
+		}
+		body, _ := json.Marshal(timeoutMsg)
+
+		select {
+		case timeoutMsgQueue <- &timeoutMsgItem{body: body, orderID: order.ID, deliverTime: deliverTime, retries: 0}:
+		default:
+			go func(orderID uint64, msgBody []byte, dt time.Time) {
+				if err := mq.SendTimerMsg(context.Background(), TopicOrderTimeout, msgBody, dt); err != nil {
+					logger.Error.Printf("send timeout message failed: orderID=%d, err=%v", orderID, err)
+				}
+			}(order.ID, body, deliverTime)
+		}
 	}
 
-	return nil
+	logger.Info.Printf("batch write success: goodsID=%d, count=%d", goodsID, len(orders))
 }
 
 // ErrStockNotEnough 库存不足错误
@@ -368,6 +461,11 @@ func (c *Consumer) checkAndCancelOrder(ctx context.Context, msg dto.OrderTimeout
 }
 
 func (c *Consumer) Stop() error {
+	// 通知批量写入协程停止
+	close(c.stopChan)
+	// 等待批量写入完成
+	c.wg.Wait()
+
 	_ = mq.CloseProducer()
 	if c.timeoutConsumer != nil {
 		_ = c.timeoutConsumer.Shutdown()

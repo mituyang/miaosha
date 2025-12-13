@@ -9,9 +9,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-//go:embed seckill.lua
-var seckillScript string
-
 //go:embed seckill_segment.lua
 var seckillSegmentScript string
 
@@ -21,39 +18,32 @@ var seckillCheckScript string
 //go:embed seckill_decr.lua
 var seckillDecrScript string
 
-var seckillSHA string
 var seckillSegmentSHA string
 var seckillCheckSHA string
 var seckillDecrSHA string
 
 // LoadScript 预加载 Lua 脚本到 Redis
 func LoadScript(ctx context.Context) error {
-	sha, err := Client.ScriptLoad(ctx, seckillScript).Result()
-	if err != nil {
-		return err
-	}
-	seckillSHA = sha
-
 	// 加载分段脚本
-	sha2, err := Client.ScriptLoad(ctx, seckillSegmentScript).Result()
+	sha, err := Client.ScriptLoad(ctx, seckillSegmentScript).Result()
 	if err != nil {
 		return err
 	}
-	seckillSegmentSHA = sha2
+	seckillSegmentSHA = sha
 
 	// 加载检查脚本
-	sha3, err := Client.ScriptLoad(ctx, seckillCheckScript).Result()
+	sha2, err := Client.ScriptLoad(ctx, seckillCheckScript).Result()
 	if err != nil {
 		return err
 	}
-	seckillCheckSHA = sha3
+	seckillCheckSHA = sha2
 
 	// 加载扣减脚本
-	sha4, err := Client.ScriptLoad(ctx, seckillDecrScript).Result()
+	sha3, err := Client.ScriptLoad(ctx, seckillDecrScript).Result()
 	if err != nil {
 		return err
 	}
-	seckillDecrSHA = sha4
+	seckillDecrSHA = sha3
 
 	return nil
 }
