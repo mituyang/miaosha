@@ -182,6 +182,8 @@ func (c *Consumer) startTimeoutConsumerWithRetry() {
 			consumer.WithNameServer([]string{c.cfg.RocketMQ.NameSrv}),
 			consumer.WithGroupName(c.cfg.RocketMQ.Group+"_timeout"),
 			consumer.WithConsumeFromWhere(consumer.ConsumeFromLastOffset),
+			consumer.WithConsumeGoroutineNums(256),
+			consumer.WithPullBatchSize(32),
 		)
 		if err != nil {
 			lastErr = err
