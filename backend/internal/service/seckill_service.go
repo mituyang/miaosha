@@ -64,7 +64,8 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 		body, _ := json.Marshal(msg)
 
 		if err := mq.SendSeckillMsg(ctx, s.cfg.RocketMQ.Topic, body); err != nil {
-			// MQ 发送失败，清除用户标记（允许重试）
+			// MQ 发送失败，返还库存并清除用户标记（允许重试）
+			_ = redis.IncrSegmentStock(ctx, goodsID, segmentID)
 			_ = redis.ClearUserMark(ctx, goodsID, userID)
 			return ResultError, err
 		}
