@@ -35,7 +35,7 @@ func initHTTPClient() {
 	}
 	httpClient = &http.Client{
 		Transport: httpTransport,
-		Timeout:   5 * time.Second,
+		Timeout:   30 * time.Second,
 	}
 }
 
@@ -163,7 +163,7 @@ func main() {
 	// 配置参数
 	concurrency := 10000 // 并发数
 	maxUsers := 10000000 // 最多使用的用户数
-	duration := 30       // 测试持续时间(秒)
+	duration := 40       // 测试持续时间(秒)
 
 	log("=== 秒杀压测配置 ===")
 	log("并发数: %d, 最大用户数: %d, 持续时间: %ds", concurrency, maxUsers, duration)

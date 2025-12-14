@@ -66,6 +66,12 @@ func IncrSegmentStock(ctx context.Context, goodsID uint64, segmentID int) error 
 	return Client.Incr(ctx, segmentKey).Err()
 }
 
+// IncrSegmentStockBy 增加指定数量的分段库存（批量取消订单时返还）
+func IncrSegmentStockBy(ctx context.Context, goodsID uint64, segmentID int, count int) error {
+	segmentKey := SegmentStockKey(goodsID, segmentID)
+	return Client.IncrBy(ctx, segmentKey, int64(count)).Err()
+}
+
 // IncrStock 增加库存到第一个分段 (用户主动取消订单时，没有分段信息)
 func IncrStock(ctx context.Context, goodsID uint64) error {
 	// 默认返还到分段0

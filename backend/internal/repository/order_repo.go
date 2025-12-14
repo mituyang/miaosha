@@ -118,3 +118,27 @@ func (r *OrderRepository) BatchCreateWithTx(tx *gorm.DB, orders []*model.Order) 
 	}
 	return tx.CreateInBatches(orders, 100).Error
 }
+
+// FindExpiredUnpaidOrders 查询超时未支付的订单（补偿机制）
+// timeoutSeconds: 订单超时时间（秒）
+func (r *OrderRepository) FindExpiredUnpaidOrders(timeoutSeconds int) ([]model.Order, error) {
+	var orders []model.Order
+	expireTime := time.Now().Add(-time.Duration(timeoutSeconds) * time.Second)
+	err := r.db.Where("status = 0 AND create_time < ?", expireTime).
+		Find(&orders).Error
+	return orders, err
+}
+
+// BatchCancelOrders 批量取消订单（只取消状态为待支付的订单）
+func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.Time) (int64, error) {
+	if len(orderIDs) == 0 {
+		return 0, nil
+	}
+	result := r.db.Model(&model.Order{}).
+		Where("id IN ? AND status = 0", orderIDs).
+		Updates(map[string]interface{}{
+			"status":      2,
+			"cancel_time": cancelTime,
+		})
+	return result.RowsAffected, result.Error
+}

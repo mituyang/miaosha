@@ -22,7 +22,7 @@ const (
 	delayMsgBackoffRatio = 2                      // 退避倍数
 
 	// 批量发送配置
-	batchSize    = 1000                 // 每批最大消息数
+	batchSize    = 200                  // 每批最大消息数
 	batchTimeout = 5 * time.Millisecond // 批量等待超时
 	bufferSize   = 100000               // 缓冲队列大小
 	senderCount  = 10                   // 发送协程数
