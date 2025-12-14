@@ -52,13 +52,6 @@ func (r *GoodsRepository) IncrStock(id uint64) error {
 		Update("stock", gorm.Expr("stock + 1")).Error
 }
 
-// IncrStockBy 增加指定数量的库存（批量取消订单时返还）
-func (r *GoodsRepository) IncrStockBy(id uint64, count int) error {
-	return r.db.Model(&model.Goods{}).
-		Where("id = ?", id).
-		Update("stock", gorm.Expr("stock + ?", count)).Error
-}
-
 // DecrStockBatch 批量扣减库存
 // 返回实际扣减的数量
 func (r *GoodsRepository) DecrStockBatch(id uint64, count int) (int64, error) {

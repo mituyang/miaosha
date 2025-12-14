@@ -44,9 +44,6 @@ const (
 	// 批量写入配置
 	batchFlushInterval = 100 * time.Millisecond // 批量刷盘间隔
 	batchQueueSize     = 10000                  // 批量队列容量
-
-	// 补偿任务配置
-	compensationInterval = 60 * time.Second // 补偿任务执行间隔
 )
 
 // timeoutMsgItem 超时消息队列项
@@ -132,10 +129,6 @@ func (c *Consumer) Start() error {
 	// 启动批量写入协程
 	c.wg.Add(1)
 	go c.startBatchWriter()
-
-	// 启动订单超时补偿任务
-	c.wg.Add(1)
-	go c.startOrderCompensation()
 
 	logger.Info.Printf("Consumer started")
 	return nil
@@ -469,93 +462,10 @@ func (c *Consumer) checkAndCancelOrder(ctx context.Context, msg dto.OrderTimeout
 	return nil
 }
 
-// startOrderCompensation 启动订单超时补偿任务（定时扫描超时未取消的订单）
-func (c *Consumer) startOrderCompensation() {
-	defer c.wg.Done()
-
-	ticker := time.NewTicker(compensationInterval)
-	defer ticker.Stop()
-
-	logger.Info.Printf("order compensation task started, interval: %v", compensationInterval)
-
-	for {
-		select {
-		case <-c.stopChan:
-			logger.Info.Printf("order compensation task stopped")
-			return
-		case <-ticker.C:
-			c.compensateExpiredOrders()
-		}
-	}
-}
-
-// compensateExpiredOrders 补偿处理超时订单（批量处理）
-func (c *Consumer) compensateExpiredOrders() {
-	ctx := context.Background()
-
-	timeoutSeconds := c.cfg.RocketMQ.OrderTimeoutSeconds
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = defaultOrderTimeoutSeconds
-	}
-
-	// 查询超时未支付的订单
-	orders, err := c.orderRepo.FindExpiredUnpaidOrders(timeoutSeconds)
-	if err != nil {
-		logger.Error.Printf("compensation: find expired orders failed: %v", err)
-		return
-	}
-
-	if len(orders) == 0 {
-		return
-	}
-
-	logger.Info.Printf("compensation: found %d expired orders", len(orders))
-
-	// 1. 收集订单ID，按商品分组
-	orderIDs := make([]uint64, 0, len(orders))
-	goodsStockMap := make(map[uint64]int) // goodsID -> 需要返还的库存数量
-	userMarkList := make([]struct{ GoodsID, UserID uint64 }, 0, len(orders))
-
-	for _, order := range orders {
-		orderIDs = append(orderIDs, order.ID)
-		goodsStockMap[order.GoodsID]++
-		userMarkList = append(userMarkList, struct{ GoodsID, UserID uint64 }{order.GoodsID, order.UserID})
-	}
-
-	// 2. 批量更新订单状态（一条 SQL）
-	affected, err := c.orderRepo.BatchCancelOrders(orderIDs, time.Now())
-	if err != nil {
-		logger.Error.Printf("compensation: batch cancel orders failed: %v", err)
-		return
-	}
-
-	if affected == 0 {
-		return
-	}
-
-	// 3. 按商品分组返还 MySQL 库存
-	for goodsID, count := range goodsStockMap {
-		_ = c.goodsRepo.IncrStockBy(goodsID, count)
-	}
-
-	// 4. 按商品分组返还 Redis 库存
-	for goodsID, count := range goodsStockMap {
-		_ = redis.IncrSegmentStockBy(ctx, goodsID, 0, count)
-	}
-
-	// 5. 批量清除用户标记
-	for _, item := range userMarkList {
-		_ = redis.ClearUserBought(ctx, item.GoodsID, item.UserID)
-		_ = redis.ClearProcessed(ctx, item.GoodsID, item.UserID)
-	}
-
-	logger.Info.Printf("compensation: cancelled %d expired orders", affected)
-}
-
 func (c *Consumer) Stop() error {
-	// 通知批量写入协程和补偿任务停止
+	// 通知批量写入协程停止
 	close(c.stopChan)
-	// 等待所有协程完成
+	// 等待批量写入完成
 	c.wg.Wait()
 
 	_ = mq.CloseProducer()
