@@ -56,8 +56,10 @@ type timeoutMsgItem struct {
 
 // orderBatchItem 订单批量写入队列项
 type orderBatchItem struct {
-	msg   *dto.SeckillMessage
-	goods *model.Goods
+	msg       *dto.SeckillMessage
+	goods     *model.Goods
+	bornTime  int64 // MQ Producer发送时间(毫秒)
+	storeTime int64 // MQ Broker存储时间(毫秒)
 }
 
 // 全局超时消息队列
@@ -220,7 +222,7 @@ func (c *Consumer) handleMessage(ctx context.Context, msgs ...*primitive.Message
 			continue
 		}
 
-		if err := c.enqueueOrder(ctx, &seckillMsg); err != nil {
+		if err := c.enqueueOrder(ctx, &seckillMsg, msg.BornTimestamp, msg.StoreTimestamp); err != nil {
 			logger.Error.Printf("enqueue order failed: userID=%d, goodsID=%d, err=%v",
 				seckillMsg.UserID, seckillMsg.GoodsID, err)
 			return consumer.ConsumeRetryLater, nil
@@ -240,7 +242,7 @@ func isDuplicateKeyError(err error) bool {
 }
 
 // enqueueOrder 将订单入队，等待批量写入
-func (c *Consumer) enqueueOrder(ctx context.Context, msg *dto.SeckillMessage) error {
+func (c *Consumer) enqueueOrder(ctx context.Context, msg *dto.SeckillMessage, bornTime, storeTime int64) error {
 	userID, goodsID := msg.UserID, msg.GoodsID
 
 	// 1. 幂等检查
@@ -266,7 +268,7 @@ func (c *Consumer) enqueueOrder(ctx context.Context, msg *dto.SeckillMessage) er
 
 	// 3. 入队等待批量写入
 	select {
-	case orderBatchQueue <- &orderBatchItem{msg: msg, goods: goods}:
+	case orderBatchQueue <- &orderBatchItem{msg: msg, goods: goods, bornTime: bornTime, storeTime: storeTime}:
 		return nil
 	default:
 		// 队列满，清除标记允许重试
@@ -326,16 +328,25 @@ func (c *Consumer) flushGoodsBatch(goodsID uint64, items []*orderBatchItem) {
 	ctx := context.Background()
 
 	// 构建订单列表
+	writeTime := time.Now() // MySQL写入时间
 	orders := make([]*model.Order, 0, len(items))
 	for _, item := range items {
 		msg := item.msg
 		requestTime := time.Now()
 		createTime := time.Now()
+		bornTime := time.Now()
+		storeTime := time.Now()
 		if msg.RequestTime > 0 {
 			requestTime = time.UnixMilli(msg.RequestTime)
 		}
 		if msg.CreateTime > 0 {
 			createTime = time.UnixMilli(msg.CreateTime)
+		}
+		if item.bornTime > 0 {
+			bornTime = time.UnixMilli(item.bornTime)
+		}
+		if item.storeTime > 0 {
+			storeTime = time.UnixMilli(item.storeTime)
 		}
 		orders = append(orders, &model.Order{
 			ID:          util.NextID(),
@@ -345,6 +356,9 @@ func (c *Consumer) flushGoodsBatch(goodsID uint64, items []*orderBatchItem) {
 			Status:      0,
 			RequestTime: requestTime,
 			CreateTime:  createTime,
+			BornTime:    bornTime,
+			StoreTime:   storeTime,
+			WriteTime:   writeTime,
 		})
 	}
 

@@ -15,6 +15,9 @@ type Order struct {
 	Status      uint8      `gorm:"not null;default:0" json:"Status"` // 0-未支付, 1-已支付, 2-已取消
 	RequestTime time.Time  `gorm:"not null" json:"RequestTime"`      // 用户请求时间
 	CreateTime  time.Time  `gorm:"not null" json:"CreateTime"`       // Redis确认时间
+	BornTime    time.Time  `gorm:"not null" json:"BornTime"`         // MQ Producer发送时间
+	StoreTime   time.Time  `gorm:"not null" json:"StoreTime"`        // MQ Broker存储时间
+	WriteTime   time.Time  `gorm:"not null" json:"WriteTime"`        // MySQL写入时间
 	PayTime     *time.Time `gorm:"default:null" json:"PayTime"`
 	CancelTime  *time.Time `gorm:"default:null" json:"CancelTime"`
 }

@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS orders (
     status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '订单状态: 0-未支付, 1-已支付, 2-已取消',
     request_time DATETIME(3) NOT NULL COMMENT '用户请求时间',
     create_time DATETIME(3) NOT NULL COMMENT 'Redis确认时间(订单创建时间)',
+    born_time DATETIME(3) NOT NULL COMMENT 'MQ Producer发送时间',
+    store_time DATETIME(3) NOT NULL COMMENT 'MQ Broker存储时间',
+    write_time DATETIME(3) NOT NULL COMMENT 'MySQL写入时间',
     pay_time DATETIME(3) DEFAULT NULL COMMENT '支付时间',
     cancel_time DATETIME(3) DEFAULT NULL COMMENT '取消时间',
     
