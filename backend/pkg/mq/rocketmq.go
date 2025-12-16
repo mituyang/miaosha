@@ -22,10 +22,10 @@ const (
 	delayMsgBackoffRatio = 2                      // 退避倍数
 
 	// 批量发送配置
-	batchSize    = 200                  // 每批最大消息数
-	batchTimeout = 5 * time.Millisecond // 批量等待超时
-	bufferSize   = 100000               // 缓冲队列大小
-	senderCount  = 10                   // 发送协程数
+	batchSize    = 5000                  // 每批最大消息数
+	batchTimeout = 50 * time.Millisecond // 批量等待超时
+	bufferSize   = 100000                // 缓冲队列大小
+	senderCount  = 200                   // 发送协程数
 )
 
 var (
@@ -107,26 +107,18 @@ func batchSender(_ int) {
 	}
 }
 
-// sendBatch 发送一批消息
+// sendBatch 发送一批消息（OneWay 模式，最高吞吐）
 func sendBatch(msgs []*primitive.Message) {
 	if len(msgs) == 0 {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
-	_, err := Producer.SendSync(ctx, msgs...)
+	// OneWay 发送：fire-and-forget，不等待任何响应
+	err := Producer.SendOneWay(ctx, msgs...)
 	if err != nil {
-		logger.Error.Printf("batch send failed: %v, count=%d", err, len(msgs))
-		// 失败的消息重新入队
-		for _, m := range msgs {
-			select {
-			case msgBuffer <- &bufferedMsg{body: m.Body}:
-			default:
-				logger.Error.Printf("buffer full, drop message")
-			}
-		}
+		logger.Error.Printf("oneway batch send failed: %v, count=%d", err, len(msgs))
 	}
 }
 
@@ -134,7 +126,7 @@ func sendBatch(msgs []*primitive.Message) {
 func EnsureTopic(ctx context.Context, topic string) error {
 	msg := &primitive.Message{
 		Topic: topic,
-		Body:  []byte("init"),
+		Body:  []byte("{}"), // 发送空 JSON 对象，消费者可正确解析
 	}
 	_, err := Producer.SendSync(ctx, msg)
 	return err

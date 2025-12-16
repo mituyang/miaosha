@@ -222,6 +222,11 @@ func (c *Consumer) handleMessage(ctx context.Context, msgs ...*primitive.Message
 			continue
 		}
 
+		// 跳过空消息（EnsureTopic 发送的初始化消息）
+		if seckillMsg.UserID == 0 || seckillMsg.GoodsID == 0 {
+			continue
+		}
+
 		if err := c.enqueueOrder(ctx, &seckillMsg, msg.BornTimestamp, msg.StoreTimestamp); err != nil {
 			logger.Error.Printf("enqueue order failed: userID=%d, goodsID=%d, err=%v",
 				seckillMsg.UserID, seckillMsg.GoodsID, err)
@@ -441,6 +446,11 @@ func (c *Consumer) handleTimeoutMessage(ctx context.Context, msgs ...*primitive.
 		var timeoutMsg dto.OrderTimeoutMessage
 		if err := json.Unmarshal(msg.Body, &timeoutMsg); err != nil {
 			logger.Error.Printf("unmarshal timeout message failed: %v", err)
+			continue
+		}
+
+		// 跳过空消息（EnsureTopic 发送的初始化消息）
+		if timeoutMsg.OrderID == 0 {
 			continue
 		}
 

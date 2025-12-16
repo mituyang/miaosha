@@ -18,7 +18,9 @@ services:
     volumes:
       - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
       - mysql_data:/var/lib/mysql
-    command: --default-authentication-plugin=mysql_native_password
+    command: >
+      --authentication_policy=caching_sha2_password
+      --host_cache_size=0
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -53,8 +55,11 @@ services:
       - "10909:10909"
     environment:
       NAMESRV_ADDR: 172.28.0.10:9876
+      JAVA_OPT_EXT: "-Xms4g -Xmx4g -Xmn2g"
     volumes:
       - ./backend/configs/broker.conf:/home/rocketmq/rocketmq-5.1.3/conf/broker.conf
+    tmpfs:
+      - /home/rocketmq/store:size=4G
     command: sh mqbroker -n 172.28.0.10:9876 -c /home/rocketmq/rocketmq-5.1.3/conf/broker.conf --enable-proxy
     depends_on:
       - namesrv

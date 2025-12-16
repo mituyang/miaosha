@@ -47,7 +47,7 @@ type OrderWithGoods struct {
 }
 
 // AfterFind 查询后将 ID 转为字符串
-func (o *OrderWithGoods) AfterFind(tx interface{}) error {
+func (o *OrderWithGoods) AfterFind(tx *gorm.DB) error {
 	return o.Order.AfterFind(tx)
 }
 

@@ -3,3 +3,4 @@ node_modules/
 logs/
 bin/
 *.txt
+.DS_Store

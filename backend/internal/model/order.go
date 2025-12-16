@@ -3,6 +3,8 @@ package model
 import (
 	"strconv"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 // Order 订单模型
@@ -28,7 +30,7 @@ func (Order) TableName() string {
 }
 
 // AfterFind GORM hook: 查询后将 ID 转为字符串
-func (o *Order) AfterFind(tx interface{}) error {
+func (o *Order) AfterFind(tx *gorm.DB) error {
 	o.IDStr = strconv.FormatUint(o.ID, 10)
 	return nil
 }
