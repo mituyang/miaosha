@@ -319,6 +319,12 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	if err != nil {
 		if errors.Is(err, ErrStockNotEnough) {
 			logger.Error.Printf("MySQL stock not enough: goodsID=%d, count=%d", goodsID, len(items))
+			// 清理 bought 标记、processed 标记，并返还 Redis 库存
+			for _, item := range items {
+				_ = redis.ClearUserBought(ctx, goodsID, item.msg.UserID)
+				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID)
+				_ = redis.IncrSegmentStock(ctx, goodsID, item.msg.SegmentID)
+			}
 		} else if !isDuplicateKeyError(err) {
 			for _, item := range items {
 				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID)
