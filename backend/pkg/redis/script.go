@@ -238,3 +238,29 @@ func CheckProcessedBatch(ctx context.Context, goodsID uint64, userIDs []uint64) 
 
 	return results, nil
 }
+
+// BatchRestoreStock 批量返还库存和清除用户标记
+func BatchRestoreStock(ctx context.Context, items []OrderTimeoutItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	pipe := Client.Pipeline()
+
+	for _, item := range items {
+		// 返还分段库存
+		segmentKey := SegmentStockKey(item.GoodsID, item.SegmentID)
+		pipe.Incr(ctx, segmentKey)
+
+		// 清除用户购买标记
+		boughtKey := BoughtKey(item.GoodsID)
+		pipe.HDel(ctx, boughtKey, fmt.Sprintf("%d", item.UserID))
+
+		// 清除已处理标记
+		processedKey := ProcessedKey(item.GoodsID)
+		pipe.SRem(ctx, processedKey, item.UserID)
+	}
+
+	_, err := pipe.Exec(ctx)
+	return err
+}

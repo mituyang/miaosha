@@ -129,3 +129,10 @@ func (r *GoodsRepository) DecrStockBatchWithTx(tx *gorm.DB, id uint64, count int
 
 	return int64(actualCount), nil
 }
+
+// IncrStockBatch 批量增加库存 (订单取消时返还)
+func (r *GoodsRepository) IncrStockBatch(id uint64, count int) error {
+	return r.db.Model(&model.Goods{}).
+		Where("id = ?", id).
+		Update("stock", gorm.Expr("stock + ?", count)).Error
+}

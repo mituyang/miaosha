@@ -129,3 +129,39 @@ func (r *OrderRepository) FindExpiredUnpaidOrders(threshold time.Time, limit int
 		Find(&orders).Error
 	return orders, err
 }
+
+// BatchCancelOrders 批量取消订单（CAS 操作，只有待支付状态才能取消）
+// 返回实际取消的订单ID列表
+func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.Time) ([]uint64, error) {
+	if len(orderIDs) == 0 {
+		return nil, nil
+	}
+
+	result := r.db.Model(&model.Order{}).
+		Where("id IN ? AND status = 0", orderIDs).
+		Updates(map[string]interface{}{
+			"status":      2,
+			"cancel_time": cancelTime,
+		})
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// 查询实际被取消的订单（只查 status=2 的，不用精确匹配时间）
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+
+	var cancelledOrders []model.Order
+	err := r.db.Where("id IN ? AND status = 2", orderIDs).Find(&cancelledOrders).Error
+	if err != nil {
+		return nil, err
+	}
+
+	cancelledIDs := make([]uint64, len(cancelledOrders))
+	for i, o := range cancelledOrders {
+		cancelledIDs[i] = o.ID
+	}
+	return cancelledIDs, nil
+}

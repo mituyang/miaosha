@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	defaultRedisScanInterval = time.Second
-	defaultBatchSize         = 100
+	defaultRedisScanInterval = 500 * time.Millisecond // 更快扫描
+	defaultBatchSize         = 2000                   // 增大批量处理数量
 	maxRetryDelay            = 5 * time.Second
 )
 
@@ -74,27 +74,72 @@ func (s *RedisTimeoutScanner) scanLoop() {
 func (s *RedisTimeoutScanner) processExpiredOrders() {
 	ctx := context.Background()
 
-	// 获取过期订单（原子操作）
-	items, err := redis.PopExpiredOrders(ctx, defaultBatchSize)
-	if err != nil {
-		logger.Error.Printf("pop expired orders failed: %v", err)
-		return
-	}
+	// 循环处理，直到没有过期订单
+	for {
+		// 获取过期订单（原子操作）
+		items, err := redis.PopExpiredOrders(ctx, defaultBatchSize)
+		if err != nil {
+			logger.Error.Printf("pop expired orders failed: %v", err)
+			return
+		}
 
+		if len(items) == 0 {
+			return
+		}
+
+		logger.Info.Printf("batch cancelling %d expired orders", len(items))
+
+		// 批量取消订单
+		s.batchCancelOrders(ctx, items)
+	}
+}
+
+// batchCancelOrders 批量取消订单
+func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []redis.OrderTimeoutItem) {
 	if len(items) == 0 {
 		return
 	}
 
-	logger.Info.Printf("processing %d expired orders", len(items))
+	// 构建订单ID列表和映射
+	orderIDs := make([]uint64, len(items))
+	itemMap := make(map[uint64]redis.OrderTimeoutItem, len(items))
+	for i, item := range items {
+		orderIDs[i] = item.OrderID
+		itemMap[item.OrderID] = item
+	}
 
-	for _, item := range items {
-		if err := s.cancelOrder(ctx, item); err != nil {
-			logger.Error.Printf("cancel order %d failed: %v", item.OrderID, err)
-			// 失败的重新入队，延迟重试
-			expireAt := time.Now().Add(maxRetryDelay)
+	// 批量取消订单
+	cancelTime := time.Now()
+	cancelledIDs, err := s.orderRepo.BatchCancelOrders(orderIDs, cancelTime)
+	if err != nil {
+		logger.Error.Printf("batch cancel orders failed: %v", err)
+		// 失败的重新入队
+		expireAt := time.Now().Add(maxRetryDelay)
+		for _, item := range items {
 			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.SegmentID, expireAt)
 		}
+		return
 	}
+
+	// 批量返还库存和清除标记
+	cancelledItems := make([]redis.OrderTimeoutItem, 0, len(cancelledIDs))
+	for _, orderID := range cancelledIDs {
+		cancelledItems = append(cancelledItems, itemMap[orderID])
+	}
+
+	// 批量 MySQL 返还库存（按商品分组）
+	goodsStockMap := make(map[uint64]int)
+	for _, item := range cancelledItems {
+		goodsStockMap[item.GoodsID]++
+	}
+	for goodsID, count := range goodsStockMap {
+		_ = s.goodsRepo.IncrStockBatch(goodsID, count)
+	}
+
+	// 批量 Redis 操作
+	_ = redis.BatchRestoreStock(ctx, cancelledItems)
+
+	logger.Info.Printf("batch cancelled %d orders", len(cancelledIDs))
 }
 
 // cancelOrder 取消订单
