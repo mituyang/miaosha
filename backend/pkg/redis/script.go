@@ -188,3 +188,53 @@ func ClearProcessed(ctx context.Context, goodsID, userID uint64) error {
 	processedKey := ProcessedKey(goodsID)
 	return Client.SRem(ctx, processedKey, userID).Err()
 }
+
+// CheckProcessedBatch 批量幂等检查（使用 Pipeline）
+// 返回: map[userID]result, 1=成功, -1=未标记, -2=已处理
+func CheckProcessedBatch(ctx context.Context, goodsID uint64, userIDs []uint64) (map[uint64]int, error) {
+	if len(userIDs) == 0 {
+		return make(map[uint64]int), nil
+	}
+
+	boughtKey := BoughtKey(goodsID)
+	processedKey := ProcessedKey(goodsID)
+
+	pipe := Client.Pipeline()
+	cmds := make([]*redis.Cmd, len(userIDs))
+
+	for i, userID := range userIDs {
+		cmds[i] = pipe.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID)
+	}
+
+	_, err := pipe.Exec(ctx)
+	if err != nil && err != redis.Nil {
+		// 脚本可能未加载，重新加载后重试
+		if err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
+			if loadErr := LoadScript(ctx); loadErr != nil {
+				return nil, loadErr
+			}
+			// 重新执行
+			pipe = Client.Pipeline()
+			cmds = make([]*redis.Cmd, len(userIDs))
+			for i, userID := range userIDs {
+				cmds[i] = pipe.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID)
+			}
+			_, err = pipe.Exec(ctx)
+			if err != nil && err != redis.Nil {
+				return nil, err
+			}
+		}
+	}
+
+	results := make(map[uint64]int, len(userIDs))
+	for i, cmd := range cmds {
+		result, err := cmd.Int()
+		if err != nil {
+			results[userIDs[i]] = -99
+		} else {
+			results[userIDs[i]] = result
+		}
+	}
+
+	return results, nil
+}

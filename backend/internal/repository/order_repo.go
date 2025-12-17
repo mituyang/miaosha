@@ -118,3 +118,14 @@ func (r *OrderRepository) BatchCreateWithTx(tx *gorm.DB, orders []*model.Order) 
 	}
 	return tx.CreateInBatches(orders, 100).Error
 }
+
+// FindExpiredUnpaidOrders 查询超时的待支付订单（MySQL 兜底扫描）
+// threshold: 创建时间阈值，早于此时间的订单视为超时
+func (r *OrderRepository) FindExpiredUnpaidOrders(threshold time.Time, limit int) ([]model.Order, error) {
+	var orders []model.Order
+	err := r.db.Model(&model.Order{}).
+		Where("status = 0 AND create_time < ?", threshold).
+		Limit(limit).
+		Find(&orders).Error
+	return orders, err
+}

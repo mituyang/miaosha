@@ -9,20 +9,27 @@ mysql:
   database: seckill
   username: root
   password: root123
-  max_open_conns: 1000
-  max_idle_conns: 1000
+  max_open_conns: 2000
+  max_idle_conns: 2000
 
 redis:
   addr: 127.0.0.1:6379
   password: ""
   db: 0
-  pool_size: 1000
+  pool_size: 2000
 
-rocketmq:
-  namesrv: 127.0.0.1:9876
-  topic: seckill_order
+# Kafka 配置
+kafka:
+  brokers:
+    - 127.0.0.1:29092
+  topic: seckill_orders
   group: seckill_consumer_group
-  order_timeout_seconds: 60  # 订单超时时间（秒）
+
+# 订单超时配置
+timeout:
+  order_timeout_seconds: 60    # 订单超时时间（秒）
+  redis_scan_interval: "1s"    # Redis ZSET 扫描间隔
+  mysql_scan_interval: "5m"    # MySQL 兜底扫描间隔
 
 jwt:
   secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="

@@ -73,11 +73,11 @@ func main() {
 	}
 	logger.Info.Println("Lua script loaded")
 
-	// 6. 初始化 RocketMQ Producer
-	if err := mq.InitProducer(&cfg.RocketMQ); err != nil {
-		logger.Error.Fatalf("init rocketmq producer failed: %v", err)
+	// 6. 初始化 Kafka Producer
+	if err := mq.InitKafkaProducer(&cfg.Kafka); err != nil {
+		logger.Error.Fatalf("init kafka producer failed: %v", err)
 	}
-	logger.Info.Println("RocketMQ producer started")
+	logger.Info.Println("Kafka producer started")
 
 	// 7. 初始化雪花算法
 	_ = util.InitSnowflake(1)
@@ -112,7 +112,7 @@ func main() {
 		logger.Error.Printf("Server shutdown error: %v", err)
 	}
 
-	_ = mq.CloseProducer()
+	_ = mq.CloseKafkaProducer()
 	_ = redis.Close()
 	_ = database.Close()
 

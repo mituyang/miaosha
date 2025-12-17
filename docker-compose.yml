@@ -37,35 +37,47 @@ services:
     networks:
       seckill-net:
 
-  namesrv:
-    image: apache/rocketmq:5.1.3
-    container_name: seckill-namesrv
-    ports:
-      - "9876:9876"
-    command: sh mqnamesrv
-    networks:
-      seckill-net:
-        ipv4_address: 172.28.0.10
-
-  broker:
-    image: apache/rocketmq:5.1.3
-    container_name: seckill-broker
-    ports:
-      - "10911:10911"
-      - "10909:10909"
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: seckill-zookeeper
     environment:
-      NAMESRV_ADDR: 172.28.0.10:9876
-      JAVA_OPT_EXT: "-Xms4g -Xmx4g -Xmn2g"
-    volumes:
-      - ./backend/configs/broker.conf:/home/rocketmq/rocketmq-5.1.3/conf/broker.conf
-    tmpfs:
-      - /home/rocketmq/store:size=4G
-    command: sh mqbroker -n 172.28.0.10:9876 -c /home/rocketmq/rocketmq-5.1.3/conf/broker.conf --enable-proxy
-    depends_on:
-      - namesrv
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
     networks:
       seckill-net:
-        ipv4_address: 172.28.0.11
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: seckill-kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 64
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_HEAP_OPTS: "-Xmx4g -Xms4g"
+      KAFKA_NUM_NETWORK_THREADS: 8
+      KAFKA_NUM_IO_THREADS: 16
+      KAFKA_SOCKET_SEND_BUFFER_BYTES: 1048576
+      KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 1048576
+    depends_on:
+      - zookeeper
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      seckill-net:
 
   backend:
     build:
@@ -83,8 +95,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      broker:
-        condition: service_started
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       seckill-net:
@@ -104,8 +116,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      broker:
-        condition: service_started
+      kafka:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       seckill-net:

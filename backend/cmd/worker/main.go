@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -44,22 +45,40 @@ func main() {
 	}
 	logger.Info.Println("Redis connected")
 
-	// 4. 初始化雪花算法
+	// 4. 加载延迟队列 Lua 脚本
+	if err := redis.LoadDelayQueueScript(context.Background()); err != nil {
+		logger.Error.Fatalf("load delay queue script failed: %v", err)
+	}
+	logger.Info.Println("Delay queue script loaded")
+
+	// 5. 初始化雪花算法
 	_ = util.InitSnowflake(2)
 
-	// 5. 启动消费者
-	c := worker.NewConsumer(cfg)
-	if err := c.Start(); err != nil {
-		logger.Error.Fatalf("start consumer failed: %v", err)
+	// 6. 启动 Kafka 消费者
+	kafkaConsumer := worker.NewKafkaConsumer(cfg)
+	if err := kafkaConsumer.Start(); err != nil {
+		logger.Error.Fatalf("start kafka consumer failed: %v", err)
 	}
 
-	// 6. 等待退出信号
+	// 7. 启动 Redis 超时扫描器
+	redisScanner := worker.NewRedisTimeoutScanner(cfg)
+	redisScanner.Start()
+
+	// 8. 启动 MySQL 兜底扫描器
+	mysqlScanner := worker.NewMySQLTimeoutScanner(cfg)
+	mysqlScanner.Start()
+
+	// 9. 等待退出信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	logger.Info.Println("Shutting down worker...")
-	_ = c.Stop()
+
+	// 按顺序停止各组件
+	mysqlScanner.Stop()
+	redisScanner.Stop()
+	_ = kafkaConsumer.Stop()
 	_ = redis.Close()
 	_ = database.Close()
 

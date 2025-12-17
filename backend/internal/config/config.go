@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	MySQL    MySQLConfig    `yaml:"mysql"`
-	Redis    RedisConfig    `yaml:"redis"`
-	RocketMQ RocketMQConfig `yaml:"rocketmq"`
-	JWT      JWTConfig      `yaml:"jwt"`
-	Admin    AdminConfig    `yaml:"admin"`
+	Server  ServerConfig  `yaml:"server"`
+	MySQL   MySQLConfig   `yaml:"mysql"`
+	Redis   RedisConfig   `yaml:"redis"`
+	Kafka   KafkaConfig   `yaml:"kafka"`
+	Timeout TimeoutConfig `yaml:"timeout"`
+	JWT     JWTConfig     `yaml:"jwt"`
+	Admin   AdminConfig   `yaml:"admin"`
 }
 
 type JWTConfig struct {
@@ -45,11 +46,16 @@ type RedisConfig struct {
 	PoolSize int    `yaml:"pool_size"`
 }
 
-type RocketMQConfig struct {
-	NameSrv             string `yaml:"namesrv"`
-	Topic               string `yaml:"topic"`
-	Group               string `yaml:"group"`
+type KafkaConfig struct {
+	Brokers []string `yaml:"brokers"`
+	Topic   string   `yaml:"topic"`
+	Group   string   `yaml:"group"`
+}
+
+type TimeoutConfig struct {
 	OrderTimeoutSeconds int    `yaml:"order_timeout_seconds"` // 订单超时时间（秒），默认60
+	RedisScanInterval   string `yaml:"redis_scan_interval"`   // Redis 扫描间隔，默认 1s
+	MySQLScanInterval   string `yaml:"mysql_scan_interval"`   // MySQL 兜底扫描间隔，默认 5m
 }
 
 var Cfg *Config

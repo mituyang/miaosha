@@ -53,18 +53,21 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 	case redis.SeckillRepeatBuy:
 		return ResultRepeatBuy, nil
 	case redis.SeckillSuccess:
-		// 3. 发送 MQ 消息，异步落库
+		// 3. 发送 Kafka 消息，异步落库
 		msg := dto.SeckillMessage{
 			UserID:      userID,
 			GoodsID:     goodsID,
 			SegmentID:   segmentID,
 			RequestTime: requestTime.UnixMilli(),
 			CreateTime:  createTime.UnixMilli(),
+			BornTime:    time.Now().UnixMilli(), // 进入 Kafka 时间
 		}
 		body, _ := json.Marshal(msg)
 
-		if err := mq.SendSeckillMsg(ctx, s.cfg.RocketMQ.Topic, body); err != nil {
-			// MQ 发送失败，返还库存并清除用户标记（允许重试）
+		// 使用 userID 作为 key，让消息分散到多个分区并行消费
+		key := []byte(fmt.Sprintf("%d", userID))
+		if err := mq.SendKafkaMsg(ctx, key, body); err != nil {
+			// Kafka 发送失败，返还库存并清除用户标记（允许重试）
 			_ = redis.IncrSegmentStock(ctx, goodsID, segmentID)
 			_ = redis.ClearUserMark(ctx, goodsID, userID)
 			return ResultError, err

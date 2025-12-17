@@ -161,7 +161,7 @@ func main() {
 	initHTTPClient()
 
 	// 配置参数
-	concurrency := 10000 // 并发数
+	concurrency := 2000  // 并发数
 	maxUsers := 10000000 // 最多使用的用户数
 	duration := 40       // 测试持续时间(秒)
 
