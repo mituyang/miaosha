@@ -21,6 +21,8 @@ services:
     command: >
       --authentication_policy=caching_sha2_password
       --host_cache_size=0
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
