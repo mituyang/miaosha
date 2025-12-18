@@ -9,8 +9,17 @@ const (
 	deductedKeyPrefix  = keyPrefix + "deducted:"  // 已扣库存用户集合（废弃，保留兼容）
 	processedKeyPrefix = keyPrefix + "processed:" // 已处理用户集合（Consumer 幂等）
 	segmentKeyPrefix   = keyPrefix + "segment:"   // 分段库存
-	SegmentCount       = 32                       // 库存分段数量
 )
+
+// SegmentCount 库存分段数量，从配置读取
+var SegmentCount = 32
+
+// SetSegmentCount 设置库存分段数量（从配置初始化）
+func SetSegmentCount(count int) {
+	if count > 0 {
+		SegmentCount = count
+	}
+}
 
 // StockKey 库存 key: seckill:stock:{goodsID}
 func StockKey(goodsID uint64) string {

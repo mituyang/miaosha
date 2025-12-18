@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	epoch          = int64(1704067200000) // 2024-01-01 00:00:00 UTC
+	defaultEpoch   = int64(1704067200000) // 2024-01-01 00:00:00 UTC
 	workerIDBits   = 10
 	sequenceBits   = 12
 	maxWorkerID    = -1 ^ (-1 << workerIDBits)
@@ -14,6 +14,9 @@ const (
 	workerIDShift  = sequenceBits
 	timestampShift = sequenceBits + workerIDBits
 )
+
+// 可配置的 epoch
+var snowflakeEpoch = defaultEpoch
 
 type Snowflake struct {
 	mu        sync.Mutex
@@ -28,6 +31,18 @@ var defaultSnowflake *Snowflake
 func InitSnowflake(workerID int64) error {
 	if workerID < 0 || workerID > maxWorkerID {
 		workerID = 1
+	}
+	defaultSnowflake = &Snowflake{workerID: workerID}
+	return nil
+}
+
+// InitSnowflakeWithEpoch 初始化雪花算法（带自定义 epoch）
+func InitSnowflakeWithEpoch(workerID, epoch int64) error {
+	if workerID < 0 || workerID > maxWorkerID {
+		workerID = 1
+	}
+	if epoch > 0 {
+		snowflakeEpoch = epoch
 	}
 	defaultSnowflake = &Snowflake{workerID: workerID}
 	return nil
@@ -57,7 +72,7 @@ func (s *Snowflake) NextID() uint64 {
 
 	s.timestamp = now
 
-	id := ((now - epoch) << timestampShift) |
+	id := ((now - snowflakeEpoch) << timestampShift) |
 		(s.workerID << workerIDShift) |
 		s.sequence
 

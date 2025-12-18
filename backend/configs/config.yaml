@@ -17,6 +17,7 @@ redis:
   password: ""
   db: 0
   pool_size: 2000
+  segment_count: 32            # 库存分段数量
 
 # Kafka 配置
 kafka:
@@ -24,12 +25,40 @@ kafka:
     - 127.0.0.1:29092
   topic: seckill_orders
   group: seckill_consumer_group
+  # Producer 配置
+  producer:
+    batch_size: 1000           # 每批最大消息数
+    batch_timeout_ms: 5        # 批量等待超时(毫秒)
+    buffer_size: 200000        # 缓冲队列大小
+    sender_count: 100          # 发送协程数
+    max_retries: 3             # 最大重试次数
+  # Consumer 配置
+  consumer:
+    consumer_count: 64         # 消费协程数
+    batch_writer_count: 32     # 写入协程数
+    batch_size: 1000           # 批量写入大小
+    batch_queue_size: 200000   # 批量队列容量
+    batch_flush_ms: 50         # 批量刷新间隔(毫秒)
+    fetch_batch_size: 2000     # 每次拉取消息数
+    fetch_timeout_ms: 50       # 拉取超时(毫秒)
+    min_bytes: 1               # 最小拉取字节数
+    max_bytes: 10485760        # 最大拉取字节数(10MB)
+    commit_interval_ms: 1000   # 自动提交间隔(毫秒)
 
 # 订单超时配置
 timeout:
   order_timeout_seconds: 60    # 订单超时时间（秒）
-  redis_scan_interval: "1s"    # Redis ZSET 扫描间隔
+  redis_scan_interval: "500ms" # Redis ZSET 扫描间隔
   mysql_scan_interval: "5m"    # MySQL 兜底扫描间隔
+  redis_batch_size: 2000       # Redis 扫描批量大小
+  mysql_batch_size: 100        # MySQL 扫描批量大小
+  max_retry_delay_ms: 5000     # 最大重试延迟(毫秒)
+  warmup_lock_expire_sec: 30   # 预热锁过期时间(秒)
+
+# 雪花算法配置
+snowflake:
+  worker_id: 1                 # 工作节点ID (0-1023)
+  epoch: 1704067200000         # 起始时间戳 (2024-01-01 00:00:00 UTC)
 
 jwt:
   secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="

@@ -8,9 +8,18 @@ import (
 )
 
 const (
-	warmupLockKey    = "seckill:warmup:lock:"
-	warmupLockExpire = 30 * time.Second
+	warmupLockKey = "seckill:warmup:lock:"
 )
+
+// 预热锁过期时间，从配置读取
+var warmupLockExpire = 30 * time.Second
+
+// SetWarmupLockExpire 设置预热锁过期时间（从配置初始化）
+func SetWarmupLockExpire(seconds int) {
+	if seconds > 0 {
+		warmupLockExpire = time.Duration(seconds) * time.Second
+	}
+}
 
 // InitStock 初始化商品库存到 Redis - 分段存储
 func InitStock(ctx context.Context, goodsID uint64, stock int) error {

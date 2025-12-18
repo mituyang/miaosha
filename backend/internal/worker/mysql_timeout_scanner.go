@@ -12,11 +12,6 @@ import (
 	"seckill/pkg/redis"
 )
 
-const (
-	defaultMySQLScanInterval = 5 * time.Minute
-	mysqlBatchSize           = 100
-)
-
 // MySQLTimeoutScanner MySQL 兜底超时扫描器
 type MySQLTimeoutScanner struct {
 	cfg            *config.Config
@@ -26,11 +21,13 @@ type MySQLTimeoutScanner struct {
 	wg             sync.WaitGroup
 	interval       time.Duration
 	timeoutSeconds int
+	batchSize      int
 }
 
 // NewMySQLTimeoutScanner 创建 MySQL 兜底扫描器
 func NewMySQLTimeoutScanner(cfg *config.Config) *MySQLTimeoutScanner {
-	interval := defaultMySQLScanInterval
+	// 默认值
+	interval := 5 * time.Minute
 	if cfg.Timeout.MySQLScanInterval != "" {
 		if d, err := time.ParseDuration(cfg.Timeout.MySQLScanInterval); err == nil {
 			interval = d
@@ -42,6 +39,11 @@ func NewMySQLTimeoutScanner(cfg *config.Config) *MySQLTimeoutScanner {
 		timeoutSeconds = 60
 	}
 
+	batchSize := cfg.Timeout.MySQLBatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
 	return &MySQLTimeoutScanner{
 		cfg:            cfg,
 		goodsRepo:      repository.NewGoodsRepository(database.DB),
@@ -49,6 +51,7 @@ func NewMySQLTimeoutScanner(cfg *config.Config) *MySQLTimeoutScanner {
 		stopChan:       make(chan struct{}),
 		interval:       interval,
 		timeoutSeconds: timeoutSeconds,
+		batchSize:      batchSize,
 	}
 }
 
@@ -87,7 +90,7 @@ func (s *MySQLTimeoutScanner) processExpiredOrders() {
 	// 查询超时的待支付订单
 	// status=0 AND create_time < NOW() - INTERVAL timeout SECOND
 	threshold := time.Now().Add(-time.Duration(s.timeoutSeconds) * time.Second)
-	orders, err := s.orderRepo.FindExpiredUnpaidOrders(threshold, mysqlBatchSize)
+	orders, err := s.orderRepo.FindExpiredUnpaidOrders(threshold, s.batchSize)
 	if err != nil {
 		logger.Error.Printf("find expired orders failed: %v", err)
 		return

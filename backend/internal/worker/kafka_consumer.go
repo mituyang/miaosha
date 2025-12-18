@@ -21,15 +21,6 @@ import (
 	"seckill/pkg/util"
 )
 
-const (
-	// 批量写入配置
-	kafkaBatchFlushInterval = 50 * time.Millisecond // 更快刷新
-	kafkaBatchQueueSize     = 200000                // 增大队列容量
-	kafkaBatchSize          = 1000                  // 增大批次
-	kafkaConsumerCount      = 64                    // 增加到 64 个消费协程
-	kafkaBatchWriterCount   = 32                    // 增加写入协程数
-)
-
 // kafkaOrderBatchItem 订单批量写入队列项
 type kafkaOrderBatchItem struct {
 	msg       *dto.SeckillMessage
@@ -40,7 +31,8 @@ type kafkaOrderBatchItem struct {
 // KafkaConsumer Kafka 消费者
 type KafkaConsumer struct {
 	cfg       *config.Config
-	readers   []*kafka.Reader // 多个 reader 并行消费
+	kafkaCfg  config.KafkaConsumerConfig // Consumer 配置
+	readers   []*kafka.Reader            // 多个 reader 并行消费
 	goodsRepo *repository.GoodsRepository
 	orderRepo *repository.OrderRepository
 	stopChan  chan struct{}
@@ -55,34 +47,71 @@ type KafkaConsumer struct {
 
 // NewKafkaConsumer 创建 Kafka 消费者
 func NewKafkaConsumer(cfg *config.Config) *KafkaConsumer {
+	kafkaCfg := cfg.Kafka.Consumer
+
+	// 应用默认值
+	if kafkaCfg.ConsumerCount <= 0 {
+		kafkaCfg.ConsumerCount = 64
+	}
+	if kafkaCfg.BatchWriterCount <= 0 {
+		kafkaCfg.BatchWriterCount = 32
+	}
+	if kafkaCfg.BatchSize <= 0 {
+		kafkaCfg.BatchSize = 1000
+	}
+	if kafkaCfg.BatchQueueSize <= 0 {
+		kafkaCfg.BatchQueueSize = 200000
+	}
+	if kafkaCfg.BatchFlushMs <= 0 {
+		kafkaCfg.BatchFlushMs = 50
+	}
+	if kafkaCfg.FetchBatchSize <= 0 {
+		kafkaCfg.FetchBatchSize = 2000
+	}
+	if kafkaCfg.FetchTimeoutMs <= 0 {
+		kafkaCfg.FetchTimeoutMs = 50
+	}
+	if kafkaCfg.MinBytes <= 0 {
+		kafkaCfg.MinBytes = 1
+	}
+	if kafkaCfg.MaxBytes <= 0 {
+		kafkaCfg.MaxBytes = 10 * 1024 * 1024 // 10MB
+	}
+	if kafkaCfg.CommitIntervalMs <= 0 {
+		kafkaCfg.CommitIntervalMs = 1000
+	}
+
 	return &KafkaConsumer{
 		cfg:        cfg,
-		readers:    make([]*kafka.Reader, 0, kafkaConsumerCount),
+		kafkaCfg:   kafkaCfg,
+		readers:    make([]*kafka.Reader, 0, kafkaCfg.ConsumerCount),
 		goodsRepo:  repository.NewGoodsRepository(database.DB),
 		orderRepo:  repository.NewOrderRepository(database.DB),
 		stopChan:   make(chan struct{}),
-		batchQueue: make(chan *kafkaOrderBatchItem, kafkaBatchQueueSize),
+		batchQueue: make(chan *kafkaOrderBatchItem, kafkaCfg.BatchQueueSize),
 	}
 }
 
 // Start 启动消费者
 func (c *KafkaConsumer) Start() error {
 	// 启动多个批量写入协程
-	for i := 0; i < kafkaBatchWriterCount; i++ {
+	for i := 0; i < c.kafkaCfg.BatchWriterCount; i++ {
 		c.wg.Add(1)
 		go c.startBatchWriter()
 	}
 
+	commitInterval := time.Duration(c.kafkaCfg.CommitIntervalMs) * time.Millisecond
+
 	// 启动多个并行消费协程，每个协程创建独立的 Reader
 	// 使用 Consumer Group 机制，Kafka 会自动分配分区给不同的消费者
-	for i := 0; i < kafkaConsumerCount; i++ {
+	for i := 0; i < c.kafkaCfg.ConsumerCount; i++ {
 		reader := kafka.NewReader(kafka.ReaderConfig{
 			Brokers:        c.cfg.Kafka.Brokers,
 			Topic:          c.cfg.Kafka.Topic,
 			GroupID:        c.cfg.Kafka.Group,
-			MinBytes:       1,           // 最小拉取 1 字节
-			MaxBytes:       10e6,        // 最大拉取 10MB
-			CommitInterval: time.Second, // 自动提交间隔
+			MinBytes:       c.kafkaCfg.MinBytes,
+			MaxBytes:       c.kafkaCfg.MaxBytes,
+			CommitInterval: commitInterval,
 			StartOffset:    kafka.LastOffset,
 		})
 		c.readers = append(c.readers, reader)
@@ -92,7 +121,7 @@ func (c *KafkaConsumer) Start() error {
 	}
 
 	logger.Info.Printf("Kafka consumer started with %d consumers, %d batch writers, brokers: %v, topic: %s, group: %s",
-		kafkaConsumerCount, kafkaBatchWriterCount, c.cfg.Kafka.Brokers, c.cfg.Kafka.Topic, c.cfg.Kafka.Group)
+		c.kafkaCfg.ConsumerCount, c.kafkaCfg.BatchWriterCount, c.cfg.Kafka.Brokers, c.cfg.Kafka.Topic, c.cfg.Kafka.Group)
 	return nil
 }
 
@@ -100,7 +129,8 @@ func (c *KafkaConsumer) Start() error {
 func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 	defer c.wg.Done()
 
-	const batchFetchSize = 2000 // 每次批量拉取的消息数
+	fetchBatchSize := c.kafkaCfg.FetchBatchSize
+	fetchTimeout := time.Duration(c.kafkaCfg.FetchTimeoutMs) * time.Millisecond
 
 	for {
 		select {
@@ -108,10 +138,10 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 			return
 		default:
 			// 批量拉取消息
-			messages := make([]kafka.Message, 0, batchFetchSize)
-			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			messages := make([]kafka.Message, 0, fetchBatchSize)
+			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 
-			for i := 0; i < batchFetchSize; i++ {
+			for i := 0; i < fetchBatchSize; i++ {
 				msg, err := reader.FetchMessage(ctx)
 				if err != nil {
 					break // 超时或无更多消息，退出循环
@@ -178,10 +208,11 @@ func (c *KafkaConsumer) enqueueOrder(_ context.Context, msg *dto.SeckillMessage,
 func (c *KafkaConsumer) startBatchWriter() {
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(kafkaBatchFlushInterval)
+	batchFlushInterval := time.Duration(c.kafkaCfg.BatchFlushMs) * time.Millisecond
+	ticker := time.NewTicker(batchFlushInterval)
 	defer ticker.Stop()
 
-	batch := make([]*kafkaOrderBatchItem, 0, kafkaBatchSize)
+	batch := make([]*kafkaOrderBatchItem, 0, c.kafkaCfg.BatchSize)
 
 	for {
 		select {
@@ -193,14 +224,14 @@ func (c *KafkaConsumer) startBatchWriter() {
 		case item := <-c.batchQueue:
 			batch = append(batch, item)
 			// 达到批量大小时立即刷新
-			if len(batch) >= kafkaBatchSize {
+			if len(batch) >= c.kafkaCfg.BatchSize {
 				c.flushBatch(batch)
-				batch = make([]*kafkaOrderBatchItem, 0, kafkaBatchSize)
+				batch = make([]*kafkaOrderBatchItem, 0, c.kafkaCfg.BatchSize)
 			}
 		case <-ticker.C:
 			if len(batch) > 0 {
 				c.flushBatch(batch)
-				batch = make([]*kafkaOrderBatchItem, 0, kafkaBatchSize)
+				batch = make([]*kafkaOrderBatchItem, 0, c.kafkaCfg.BatchSize)
 			}
 		}
 	}

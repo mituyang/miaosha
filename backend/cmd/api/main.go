@@ -80,12 +80,20 @@ func main() {
 	logger.Info.Println("Kafka producer started")
 
 	// 7. 初始化雪花算法
-	_ = util.InitSnowflake(1)
+	workerID := cfg.Snowflake.WorkerID
+	if workerID <= 0 {
+		workerID = 1
+	}
+	_ = util.InitSnowflakeWithEpoch(workerID, cfg.Snowflake.Epoch)
 
-	// 8. 启动时预热库存
+	// 8. 初始化 Redis 配置
+	redis.SetWarmupLockExpire(cfg.Timeout.WarmupLockExpireSec)
+	redis.SetSegmentCount(cfg.Redis.SegmentCount)
+
+	// 9. 启动时预热库存
 	warmUpStock(cfg)
 
-	// 9. 启动 HTTP 服务
+	// 10. 启动 HTTP 服务
 	r := router.Setup(cfg)
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
@@ -99,7 +107,7 @@ func main() {
 		}
 	}()
 
-	// 10. 优雅关闭
+	// 11. 优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

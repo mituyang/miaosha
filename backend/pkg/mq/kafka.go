@@ -11,18 +11,6 @@ import (
 	"seckill/pkg/logger"
 )
 
-const (
-	// 批量发送配置
-	kafkaBatchSize    = 1000                 // 每批最大消息数 (500 → 1000)
-	kafkaBatchTimeout = 5 * time.Millisecond // 批量等待超时 (10ms → 5ms)
-	kafkaBufferSize   = 200000               // 缓冲队列大小 (100000 → 200000)
-	kafkaSenderCount  = 100                  // 发送协程数 (50 → 100)
-
-	// 重试配置
-	kafkaMaxRetries   = 3
-	kafkaRetryBackoff = 100 * time.Millisecond
-)
-
 var (
 	kafkaWriter  *kafka.Writer
 	kafkaMsgBuf  chan *kafkaMsg
@@ -30,6 +18,7 @@ var (
 	kafkaWg      sync.WaitGroup
 	kafkaTopic   string
 	kafkaBrokers []string
+	kafkaCfg     config.KafkaProducerConfig
 )
 
 type kafkaMsg struct {
@@ -41,30 +30,51 @@ type kafkaMsg struct {
 func InitKafkaProducer(cfg *config.KafkaConfig) error {
 	kafkaBrokers = cfg.Brokers
 	kafkaTopic = cfg.Topic
+	kafkaCfg = cfg.Producer
+
+	// 应用默认值
+	if kafkaCfg.BatchSize <= 0 {
+		kafkaCfg.BatchSize = 1000
+	}
+	if kafkaCfg.BatchTimeoutMs <= 0 {
+		kafkaCfg.BatchTimeoutMs = 5
+	}
+	if kafkaCfg.BufferSize <= 0 {
+		kafkaCfg.BufferSize = 200000
+	}
+	if kafkaCfg.SenderCount <= 0 {
+		kafkaCfg.SenderCount = 100
+	}
+	if kafkaCfg.MaxRetries <= 0 {
+		kafkaCfg.MaxRetries = 3
+	}
+
+	batchTimeout := time.Duration(kafkaCfg.BatchTimeoutMs) * time.Millisecond
 
 	// 创建 Writer
 	kafkaWriter = &kafka.Writer{
 		Addr:         kafka.TCP(cfg.Brokers...),
 		Topic:        cfg.Topic,
 		Balancer:     &kafka.Hash{}, // 按 key hash 分区
-		BatchSize:    kafkaBatchSize,
-		BatchTimeout: kafkaBatchTimeout,
+		BatchSize:    kafkaCfg.BatchSize,
+		BatchTimeout: batchTimeout,
 		RequiredAcks: kafka.RequireOne, // Leader 确认即可
 		Async:        false,            // 同步发送，保证可靠性
-		MaxAttempts:  kafkaMaxRetries,
+		MaxAttempts:  kafkaCfg.MaxRetries,
 	}
 
 	// 初始化缓冲队列
-	kafkaMsgBuf = make(chan *kafkaMsg, kafkaBufferSize)
+	kafkaMsgBuf = make(chan *kafkaMsg, kafkaCfg.BufferSize)
 	kafkaStopCh = make(chan struct{})
 
 	// 启动发送协程
-	for i := 0; i < kafkaSenderCount; i++ {
+	for i := 0; i < kafkaCfg.SenderCount; i++ {
 		kafkaWg.Add(1)
 		go kafkaBatchSender()
 	}
 
-	logger.Info.Printf("Kafka producer initialized, brokers: %v, topic: %s", cfg.Brokers, cfg.Topic)
+	logger.Info.Printf("Kafka producer initialized, brokers: %v, topic: %s, batchSize: %d, senderCount: %d",
+		cfg.Brokers, cfg.Topic, kafkaCfg.BatchSize, kafkaCfg.SenderCount)
 	return nil
 }
 
@@ -72,8 +82,9 @@ func InitKafkaProducer(cfg *config.KafkaConfig) error {
 func kafkaBatchSender() {
 	defer kafkaWg.Done()
 
-	batch := make([]kafka.Message, 0, kafkaBatchSize)
-	ticker := time.NewTicker(kafkaBatchTimeout)
+	batchTimeout := time.Duration(kafkaCfg.BatchTimeoutMs) * time.Millisecond
+	batch := make([]kafka.Message, 0, kafkaCfg.BatchSize)
+	ticker := time.NewTicker(batchTimeout)
 	defer ticker.Stop()
 
 	for {
@@ -90,16 +101,16 @@ func kafkaBatchSender() {
 				Key:   msg.key,
 				Value: msg.value,
 			})
-			if len(batch) >= kafkaBatchSize {
+			if len(batch) >= kafkaCfg.BatchSize {
 				sendKafkaBatch(batch)
-				batch = make([]kafka.Message, 0, kafkaBatchSize)
-				ticker.Reset(kafkaBatchTimeout)
+				batch = make([]kafka.Message, 0, kafkaCfg.BatchSize)
+				ticker.Reset(batchTimeout)
 			}
 
 		case <-ticker.C:
 			if len(batch) > 0 {
 				sendKafkaBatch(batch)
-				batch = make([]kafka.Message, 0, kafkaBatchSize)
+				batch = make([]kafka.Message, 0, kafkaCfg.BatchSize)
 			}
 		}
 	}

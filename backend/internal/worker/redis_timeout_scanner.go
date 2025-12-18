@@ -12,37 +12,46 @@ import (
 	"seckill/pkg/redis"
 )
 
-const (
-	defaultRedisScanInterval = 500 * time.Millisecond // 更快扫描
-	defaultBatchSize         = 2000                   // 增大批量处理数量
-	maxRetryDelay            = 5 * time.Second
-)
-
 // RedisTimeoutScanner Redis 超时扫描器
 type RedisTimeoutScanner struct {
-	cfg       *config.Config
-	goodsRepo *repository.GoodsRepository
-	orderRepo *repository.OrderRepository
-	stopChan  chan struct{}
-	wg        sync.WaitGroup
-	interval  time.Duration
+	cfg           *config.Config
+	goodsRepo     *repository.GoodsRepository
+	orderRepo     *repository.OrderRepository
+	stopChan      chan struct{}
+	wg            sync.WaitGroup
+	interval      time.Duration
+	batchSize     int
+	maxRetryDelay time.Duration
 }
 
 // NewRedisTimeoutScanner 创建 Redis 超时扫描器
 func NewRedisTimeoutScanner(cfg *config.Config) *RedisTimeoutScanner {
-	interval := defaultRedisScanInterval
+	// 默认值
+	interval := 500 * time.Millisecond
 	if cfg.Timeout.RedisScanInterval != "" {
 		if d, err := time.ParseDuration(cfg.Timeout.RedisScanInterval); err == nil {
 			interval = d
 		}
 	}
 
+	batchSize := cfg.Timeout.RedisBatchSize
+	if batchSize <= 0 {
+		batchSize = 2000
+	}
+
+	maxRetryDelay := time.Duration(cfg.Timeout.MaxRetryDelayMs) * time.Millisecond
+	if maxRetryDelay <= 0 {
+		maxRetryDelay = 5 * time.Second
+	}
+
 	return &RedisTimeoutScanner{
-		cfg:       cfg,
-		goodsRepo: repository.NewGoodsRepository(database.DB),
-		orderRepo: repository.NewOrderRepository(database.DB),
-		stopChan:  make(chan struct{}),
-		interval:  interval,
+		cfg:           cfg,
+		goodsRepo:     repository.NewGoodsRepository(database.DB),
+		orderRepo:     repository.NewOrderRepository(database.DB),
+		stopChan:      make(chan struct{}),
+		interval:      interval,
+		batchSize:     batchSize,
+		maxRetryDelay: maxRetryDelay,
 	}
 }
 
@@ -77,7 +86,7 @@ func (s *RedisTimeoutScanner) processExpiredOrders() {
 	// 循环处理，直到没有过期订单
 	for {
 		// 获取过期订单（原子操作）
-		items, err := redis.PopExpiredOrders(ctx, defaultBatchSize)
+		items, err := redis.PopExpiredOrders(ctx, int64(s.batchSize))
 		if err != nil {
 			logger.Error.Printf("pop expired orders failed: %v", err)
 			return
@@ -114,7 +123,7 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 	if err != nil {
 		logger.Error.Printf("batch cancel orders failed: %v", err)
 		// 失败的重新入队
-		expireAt := time.Now().Add(maxRetryDelay)
+		expireAt := time.Now().Add(s.maxRetryDelay)
 		for _, item := range items {
 			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.SegmentID, expireAt)
 		}

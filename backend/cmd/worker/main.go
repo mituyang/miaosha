@@ -51,24 +51,31 @@ func main() {
 	}
 	logger.Info.Println("Delay queue script loaded")
 
-	// 5. 初始化雪花算法
-	_ = util.InitSnowflake(2)
+	// 5. 初始化 Redis 配置
+	redis.SetSegmentCount(cfg.Redis.SegmentCount)
 
-	// 6. 启动 Kafka 消费者
+	// 6. 初始化雪花算法
+	workerID := cfg.Snowflake.WorkerID
+	if workerID <= 0 {
+		workerID = 2 // Worker 默认使用 2
+	}
+	_ = util.InitSnowflakeWithEpoch(workerID, cfg.Snowflake.Epoch)
+
+	// 7. 启动 Kafka 消费者
 	kafkaConsumer := worker.NewKafkaConsumer(cfg)
 	if err := kafkaConsumer.Start(); err != nil {
 		logger.Error.Fatalf("start kafka consumer failed: %v", err)
 	}
 
-	// 7. 启动 Redis 超时扫描器
+	// 8. 启动 Redis 超时扫描器
 	redisScanner := worker.NewRedisTimeoutScanner(cfg)
 	redisScanner.Start()
 
-	// 8. 启动 MySQL 兜底扫描器
+	// 9. 启动 MySQL 兜底扫描器
 	mysqlScanner := worker.NewMySQLTimeoutScanner(cfg)
 	mysqlScanner.Start()
 
-	// 9. 等待退出信号
+	// 10. 等待退出信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
