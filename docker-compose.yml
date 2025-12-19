@@ -36,6 +36,8 @@ services:
     container_name: seckill-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     networks:
       seckill-net:
 
@@ -47,6 +49,10 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+      - zookeeper_secrets:/etc/zookeeper/secrets
     networks:
       seckill-net:
 
@@ -73,6 +79,9 @@ services:
       KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 1048576
     depends_on:
       - zookeeper
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+      - kafka_secrets:/etc/kafka/secrets
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s
@@ -139,3 +148,9 @@ services:
 
 volumes:
   mysql_data:
+  redis_data:
+  zookeeper_data:
+  zookeeper_log:
+  zookeeper_secrets:
+  kafka_data:
+  kafka_secrets:
