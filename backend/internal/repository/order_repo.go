@@ -32,12 +32,14 @@ func (r *OrderRepository) CreateWithTx(tx *gorm.DB, order *model.Order) error {
 }
 
 // ExistsByUserAndGoods 检查用户是否有该商品的有效订单（未取消）
+// 使用 EXISTS 替代 COUNT，找到一条就返回，性能更好
 func (r *OrderRepository) ExistsByUserAndGoods(userID, goodsID uint64) (bool, error) {
-	var count int64
-	err := r.db.Model(&model.Order{}).
-		Where("user_id = ? AND goods_id = ? AND status != 2", userID, goodsID).
-		Count(&count).Error
-	return count > 0, err
+	var exists bool
+	err := r.db.Raw(
+		"SELECT EXISTS(SELECT 1 FROM orders WHERE user_id = ? AND goods_id = ? AND status != 2 LIMIT 1)",
+		userID, goodsID,
+	).Scan(&exists).Error
+	return exists, err
 }
 
 // OrderWithGoods 订单带商品信息
