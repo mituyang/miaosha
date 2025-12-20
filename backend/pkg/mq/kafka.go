@@ -21,9 +21,13 @@ var (
 	kafkaCfg     config.KafkaProducerConfig
 )
 
+// 最大重试次数（入队重试，非Kafka层重试）
+const maxEnqueueRetries = 3
+
 type kafkaMsg struct {
-	key   []byte
-	value []byte
+	key     []byte
+	value   []byte
+	retries int // 重试计数
 }
 
 // InitKafkaProducer 初始化 Kafka Producer
@@ -83,7 +87,7 @@ func kafkaBatchSender() {
 	defer kafkaWg.Done()
 
 	batchTimeout := time.Duration(kafkaCfg.BatchTimeoutMs) * time.Millisecond
-	batch := make([]kafka.Message, 0, kafkaCfg.BatchSize)
+	batch := make([]*kafkaMsg, 0, kafkaCfg.BatchSize)
 	ticker := time.NewTicker(batchTimeout)
 	defer ticker.Stop()
 
@@ -97,43 +101,54 @@ func kafkaBatchSender() {
 			return
 
 		case msg := <-kafkaMsgBuf:
-			batch = append(batch, kafka.Message{
-				Key:   msg.key,
-				Value: msg.value,
-			})
+			batch = append(batch, msg)
 			if len(batch) >= kafkaCfg.BatchSize {
 				sendKafkaBatch(batch)
-				batch = make([]kafka.Message, 0, kafkaCfg.BatchSize)
+				batch = make([]*kafkaMsg, 0, kafkaCfg.BatchSize)
 				ticker.Reset(batchTimeout)
 			}
 
 		case <-ticker.C:
 			if len(batch) > 0 {
 				sendKafkaBatch(batch)
-				batch = make([]kafka.Message, 0, kafkaCfg.BatchSize)
+				batch = make([]*kafkaMsg, 0, kafkaCfg.BatchSize)
 			}
 		}
 	}
 }
 
 // sendKafkaBatch 发送一批消息
-func sendKafkaBatch(msgs []kafka.Message) {
+func sendKafkaBatch(msgs []*kafkaMsg) {
 	if len(msgs) == 0 {
 		return
+	}
+
+	// 构建 Kafka 消息
+	kafkaMsgs := make([]kafka.Message, len(msgs))
+	for i, m := range msgs {
+		kafkaMsgs[i] = kafka.Message{
+			Key:   m.key,
+			Value: m.value,
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err := kafkaWriter.WriteMessages(ctx, msgs...)
+	err := kafkaWriter.WriteMessages(ctx, kafkaMsgs...)
 	if err != nil {
 		logger.Error.Printf("kafka batch send failed: %v, count=%d", err, len(msgs))
-		// 失败的消息重新入队
+		// 失败的消息重新入队（带重试计数限制）
 		for _, m := range msgs {
+			m.retries++
+			if m.retries > maxEnqueueRetries {
+				logger.Error.Printf("kafka message dropped after %d retries, key=%s", m.retries, string(m.key))
+				continue
+			}
 			select {
-			case kafkaMsgBuf <- &kafkaMsg{key: m.Key, value: m.Value}:
+			case kafkaMsgBuf <- m:
 			default:
-				logger.Error.Printf("kafka buffer full, drop message")
+				logger.Error.Printf("kafka buffer full, drop message, key=%s", string(m.key))
 			}
 		}
 	}

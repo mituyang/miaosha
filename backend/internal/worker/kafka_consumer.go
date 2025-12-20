@@ -28,6 +28,15 @@ type kafkaOrderBatchItem struct {
 	storeTime time.Time // 从 Kafka 消费的时间
 }
 
+// cachedGoods 带过期时间的商品缓存
+type cachedGoods struct {
+	goods    *model.Goods
+	expireAt time.Time
+}
+
+// 商品缓存TTL
+const goodsCacheTTL = 5 * time.Minute
+
 // KafkaConsumer Kafka 消费者
 type KafkaConsumer struct {
 	cfg       *config.Config
@@ -41,7 +50,7 @@ type KafkaConsumer struct {
 	// 批量写入队列
 	batchQueue chan *kafkaOrderBatchItem
 
-	// 商品缓存（避免重复查询 MySQL）
+	// 商品缓存（避免重复查询 MySQL，带TTL）
 	goodsCache sync.Map
 }
 
@@ -50,8 +59,9 @@ func NewKafkaConsumer(cfg *config.Config) *KafkaConsumer {
 	kafkaCfg := cfg.Kafka.Consumer
 
 	// 应用默认值
+	// ConsumerCount 建议设置为 Kafka 分区数，过多会导致空闲和 rebalance 开销
 	if kafkaCfg.ConsumerCount <= 0 {
-		kafkaCfg.ConsumerCount = 64
+		kafkaCfg.ConsumerCount = 8 // 默认8个，适配常见的分区配置
 	}
 	if kafkaCfg.BatchWriterCount <= 0 {
 		kafkaCfg.BatchWriterCount = 32
@@ -132,15 +142,19 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 	fetchBatchSize := c.kafkaCfg.FetchBatchSize
 	fetchTimeout := time.Duration(c.kafkaCfg.FetchTimeoutMs) * time.Millisecond
 
+	// 预分配消息切片，避免每次循环重新分配
+	messages := make([]kafka.Message, 0, fetchBatchSize)
+
 	for {
 		select {
 		case <-c.stopChan:
 			return
 		default:
-			// 批量拉取消息
-			messages := make([]kafka.Message, 0, fetchBatchSize)
-			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+			// 重置切片（复用底层数组）
+			messages = messages[:0]
 
+			// 批量拉取消息
+			ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 			for i := 0; i < fetchBatchSize; i++ {
 				msg, err := reader.FetchMessage(ctx)
 				if err != nil {
@@ -156,12 +170,12 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 
 			// 批量处理消息
 			var lastMsg kafka.Message
-			for _, msg := range messages {
-				if err := c.handleMessage(context.Background(), &msg); err != nil {
+			for i := range messages {
+				if err := c.handleMessage(&messages[i]); err != nil {
 					logger.Error.Printf("consumer[%d] handle message failed: %v", consumerID, err)
 					continue
 				}
-				lastMsg = msg
+				lastMsg = messages[i]
 			}
 
 			// 提交最后一条消息的 offset
@@ -175,7 +189,7 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 }
 
 // handleMessage 处理单条消息
-func (c *KafkaConsumer) handleMessage(ctx context.Context, msg *kafka.Message) error {
+func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
 	// 记录从 Kafka 消费的时间
 	storeTime := time.Now()
 
@@ -190,11 +204,11 @@ func (c *KafkaConsumer) handleMessage(ctx context.Context, msg *kafka.Message) e
 		return nil
 	}
 
-	return c.enqueueOrder(ctx, &seckillMsg, storeTime)
+	return c.enqueueOrder(&seckillMsg, storeTime)
 }
 
 // enqueueOrder 将订单入队，等待批量写入（快速入队，检查延迟到写入时）
-func (c *KafkaConsumer) enqueueOrder(_ context.Context, msg *dto.SeckillMessage, storeTime time.Time) error {
+func (c *KafkaConsumer) enqueueOrder(msg *dto.SeckillMessage, storeTime time.Time) error {
 	// 直接入队，Redis 检查延迟到批量写入时处理
 	select {
 	case c.batchQueue <- &kafkaOrderBatchItem{msg: msg, goods: nil, storeTime: storeTime}:
@@ -391,21 +405,30 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 // ErrStockNotEnough 库存不足错误
 var ErrStockNotEnough = errors.New("stock not enough")
 
-// getGoodsCached 从缓存获取商品信息
+// getGoodsCached 从缓存获取商品信息（带TTL）
 func (c *KafkaConsumer) getGoodsCached(goodsID uint64) (*model.Goods, error) {
 	// 先查缓存
 	if cached, ok := c.goodsCache.Load(goodsID); ok {
-		return cached.(*model.Goods), nil
+		cg := cached.(*cachedGoods)
+		// 检查是否过期
+		if time.Now().Before(cg.expireAt) {
+			return cg.goods, nil
+		}
+		// 已过期，删除缓存
+		c.goodsCache.Delete(goodsID)
 	}
 
-	// 缓存未命中，查 MySQL
+	// 缓存未命中或已过期，查 MySQL
 	goods, err := c.goodsRepo.GetByID(goodsID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 存入缓存
-	c.goodsCache.Store(goodsID, goods)
+	// 存入缓存（带过期时间）
+	c.goodsCache.Store(goodsID, &cachedGoods{
+		goods:    goods,
+		expireAt: time.Now().Add(goodsCacheTTL),
+	})
 	return goods, nil
 }
 

@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -36,6 +37,19 @@ func Init(cfg *config.MySQLConfig) error {
 	// 连接池配置
 	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+
+	// 连接生命周期配置（防止连接泄漏）
+	connMaxLifetime := time.Hour // 默认1小时
+	if cfg.ConnMaxLifetimeSec > 0 {
+		connMaxLifetime = time.Duration(cfg.ConnMaxLifetimeSec) * time.Second
+	}
+	sqlDB.SetConnMaxLifetime(connMaxLifetime)
+
+	connMaxIdleTime := 10 * time.Minute // 默认10分钟
+	if cfg.ConnMaxIdleTimeSec > 0 {
+		connMaxIdleTime = time.Duration(cfg.ConnMaxIdleTimeSec) * time.Second
+	}
+	sqlDB.SetConnMaxIdleTime(connMaxIdleTime)
 
 	DB = db
 	return nil

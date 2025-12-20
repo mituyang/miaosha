@@ -8,6 +8,11 @@ import (
 	"seckill/internal/model"
 )
 
+// 批量操作常量
+const (
+	DefaultBatchSize = 100 // 默认批量插入大小
+)
+
 type OrderRepository struct {
 	db *gorm.DB
 }
@@ -36,8 +41,8 @@ func (r *OrderRepository) CreateWithTx(tx *gorm.DB, order *model.Order) error {
 func (r *OrderRepository) ExistsByUserAndGoods(userID, goodsID uint64) (bool, error) {
 	var exists bool
 	err := r.db.Raw(
-		"SELECT EXISTS(SELECT 1 FROM orders WHERE user_id = ? AND goods_id = ? AND status != 2 LIMIT 1)",
-		userID, goodsID,
+		"SELECT EXISTS(SELECT 1 FROM orders WHERE user_id = ? AND goods_id = ? AND status != ? LIMIT 1)",
+		userID, goodsID, model.OrderStatusCancelled,
 	).Scan(&exists).Error
 	return exists, err
 }
@@ -89,9 +94,9 @@ func (r *OrderRepository) UpdateStatus(orderID uint64, status uint8) error {
 // 返回影响行数，0 表示订单不存在或状态不是待支付
 func (r *OrderRepository) CancelOrder(orderID uint64, cancelTime time.Time) (int64, error) {
 	result := r.db.Model(&model.Order{}).
-		Where("id = ? AND status = 0", orderID).
+		Where("id = ? AND status = ?", orderID, model.OrderStatusUnpaid).
 		Updates(map[string]interface{}{
-			"status":      2,
+			"status":      model.OrderStatusCancelled,
 			"cancel_time": cancelTime,
 		})
 	return result.RowsAffected, result.Error
@@ -100,7 +105,7 @@ func (r *OrderRepository) CancelOrder(orderID uint64, cancelTime time.Time) (int
 // Pay 支付订单
 func (r *OrderRepository) Pay(orderID uint64, payTime time.Time) error {
 	return r.db.Model(&model.Order{}).Where("id = ?", orderID).Updates(map[string]interface{}{
-		"status":   1,
+		"status":   model.OrderStatusPaid,
 		"pay_time": payTime,
 	}).Error
 }
@@ -110,7 +115,7 @@ func (r *OrderRepository) BatchCreate(orders []*model.Order) error {
 	if len(orders) == 0 {
 		return nil
 	}
-	return r.db.CreateInBatches(orders, 100).Error
+	return r.db.CreateInBatches(orders, DefaultBatchSize).Error
 }
 
 // BatchCreateWithTx 在事务中批量创建订单
@@ -118,7 +123,7 @@ func (r *OrderRepository) BatchCreateWithTx(tx *gorm.DB, orders []*model.Order) 
 	if len(orders) == 0 {
 		return nil
 	}
-	return tx.CreateInBatches(orders, 100).Error
+	return tx.CreateInBatches(orders, DefaultBatchSize).Error
 }
 
 // FindExpiredUnpaidOrders 查询超时的待支付订单（MySQL 兜底扫描）
@@ -126,7 +131,7 @@ func (r *OrderRepository) BatchCreateWithTx(tx *gorm.DB, orders []*model.Order) 
 func (r *OrderRepository) FindExpiredUnpaidOrders(threshold time.Time, limit int) ([]model.Order, error) {
 	var orders []model.Order
 	err := r.db.Model(&model.Order{}).
-		Where("status = 0 AND write_time < ?", threshold).
+		Where("status = ? AND write_time < ?", model.OrderStatusUnpaid, threshold).
 		Limit(limit).
 		Find(&orders).Error
 	return orders, err
@@ -140,9 +145,9 @@ func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.T
 	}
 
 	result := r.db.Model(&model.Order{}).
-		Where("id IN ? AND status = 0", orderIDs).
+		Where("id IN ? AND status = ?", orderIDs, model.OrderStatusUnpaid).
 		Updates(map[string]interface{}{
-			"status":      2,
+			"status":      model.OrderStatusCancelled,
 			"cancel_time": cancelTime,
 		})
 
@@ -150,13 +155,13 @@ func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.T
 		return nil, result.Error
 	}
 
-	// 查询实际被取消的订单（只查 status=2 的，不用精确匹配时间）
+	// 查询实际被取消的订单（只查 status=已取消 的，不用精确匹配时间）
 	if result.RowsAffected == 0 {
 		return nil, nil
 	}
 
 	var cancelledOrders []model.Order
-	err := r.db.Where("id IN ? AND status = 2", orderIDs).Find(&cancelledOrders).Error
+	err := r.db.Where("id IN ? AND status = ?", orderIDs, model.OrderStatusCancelled).Find(&cancelledOrders).Error
 	if err != nil {
 		return nil, err
 	}

@@ -22,6 +22,13 @@ type RedisTimeoutScanner struct {
 	interval      time.Duration
 	batchSize     int
 	maxRetryDelay time.Duration
+
+	// 熔断机制
+	consecutiveFailures int           // 连续失败次数
+	maxFailures         int           // 触发熔断的最大失败次数
+	backoffDuration     time.Duration // 当前退避时间
+	maxBackoff          time.Duration // 最大退避时间
+	baseBackoff         time.Duration // 基础退避时间
 }
 
 // NewRedisTimeoutScanner 创建 Redis 超时扫描器
@@ -52,6 +59,10 @@ func NewRedisTimeoutScanner(cfg *config.Config) *RedisTimeoutScanner {
 		interval:      interval,
 		batchSize:     batchSize,
 		maxRetryDelay: maxRetryDelay,
+		// 熔断机制默认值
+		maxFailures: 5,                // 连续5次失败触发熔断
+		baseBackoff: 1 * time.Second,  // 基础退避1秒
+		maxBackoff:  30 * time.Second, // 最大退避30秒
 	}
 }
 
@@ -74,14 +85,51 @@ func (s *RedisTimeoutScanner) scanLoop() {
 		case <-s.stopChan:
 			return
 		case <-ticker.C:
-			s.processExpiredOrders()
+			// 检查是否处于熔断状态
+			if s.backoffDuration > 0 {
+				logger.Info.Printf("circuit breaker active, waiting %v before retry", s.backoffDuration)
+				select {
+				case <-s.stopChan:
+					return
+				case <-time.After(s.backoffDuration):
+					// 退避结束，尝试恢复
+				}
+			}
+
+			success := s.processExpiredOrders()
+			s.updateCircuitBreaker(success)
 		}
 	}
 }
 
-// processExpiredOrders 处理过期订单
-func (s *RedisTimeoutScanner) processExpiredOrders() {
+// updateCircuitBreaker 更新熔断状态
+func (s *RedisTimeoutScanner) updateCircuitBreaker(success bool) {
+	if success {
+		// 成功则重置熔断状态
+		if s.consecutiveFailures > 0 {
+			logger.Info.Printf("circuit breaker reset after %d consecutive failures", s.consecutiveFailures)
+		}
+		s.consecutiveFailures = 0
+		s.backoffDuration = 0
+	} else {
+		// 失败则增加计数
+		s.consecutiveFailures++
+		if s.consecutiveFailures >= s.maxFailures {
+			// 触发熔断，计算指数退避时间
+			s.backoffDuration = s.baseBackoff * time.Duration(1<<uint(s.consecutiveFailures-s.maxFailures))
+			if s.backoffDuration > s.maxBackoff {
+				s.backoffDuration = s.maxBackoff
+			}
+			logger.Error.Printf("circuit breaker triggered after %d failures, backoff: %v",
+				s.consecutiveFailures, s.backoffDuration)
+		}
+	}
+}
+
+// processExpiredOrders 处理过期订单，返回是否成功
+func (s *RedisTimeoutScanner) processExpiredOrders() bool {
 	ctx := context.Background()
+	hasError := false
 
 	// 循环处理，直到没有过期订单
 	for {
@@ -89,24 +137,26 @@ func (s *RedisTimeoutScanner) processExpiredOrders() {
 		items, err := redis.PopExpiredOrders(ctx, int64(s.batchSize))
 		if err != nil {
 			logger.Error.Printf("pop expired orders failed: %v", err)
-			return
+			return false
 		}
 
 		if len(items) == 0 {
-			return
+			return !hasError
 		}
 
 		logger.Info.Printf("batch cancelling %d expired orders", len(items))
 
 		// 批量取消订单
-		s.batchCancelOrders(ctx, items)
+		if err := s.batchCancelOrders(ctx, items); err != nil {
+			hasError = true
+		}
 	}
 }
 
 // batchCancelOrders 批量取消订单
-func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []redis.OrderTimeoutItem) {
+func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []redis.OrderTimeoutItem) error {
 	if len(items) == 0 {
-		return
+		return nil
 	}
 
 	// 构建订单ID列表和映射
@@ -127,7 +177,7 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 		for _, item := range items {
 			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.SegmentID, expireAt)
 		}
-		return
+		return err
 	}
 
 	// 批量返还库存和清除标记
@@ -142,13 +192,18 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 		goodsStockMap[item.GoodsID]++
 	}
 	for goodsID, count := range goodsStockMap {
-		_ = s.goodsRepo.IncrStockBatch(goodsID, count)
+		if err := s.goodsRepo.IncrStockBatch(goodsID, count); err != nil {
+			logger.Error.Printf("incr stock batch failed: goodsID=%d, count=%d, err=%v", goodsID, count, err)
+		}
 	}
 
 	// 批量 Redis 操作
-	_ = redis.BatchRestoreStock(ctx, cancelledItems)
+	if err := redis.BatchRestoreStock(ctx, cancelledItems); err != nil {
+		logger.Error.Printf("batch restore stock failed: %v", err)
+	}
 
 	logger.Info.Printf("batch cancelled %d orders", len(cancelledIDs))
+	return nil
 }
 
 // cancelOrder 取消订单

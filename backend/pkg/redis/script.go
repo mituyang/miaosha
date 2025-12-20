@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"math/rand"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -48,6 +49,45 @@ func LoadScript(ctx context.Context) error {
 	return nil
 }
 
+// isNoScriptError 判断是否是脚本不存在错误
+func isNoScriptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == redis.Nil {
+		return true
+	}
+	return strings.Contains(err.Error(), "NOSCRIPT")
+}
+
+// evalShaWithRetry 执行Lua脚本，如果脚本不存在则重新加载后重试
+func evalShaWithRetry(ctx context.Context, sha string, keys []string, args ...interface{}) (interface{}, error) {
+	result, err := Client.EvalSha(ctx, sha, keys, args...).Result()
+	if err != nil && isNoScriptError(err) {
+		if loadErr := LoadScript(ctx); loadErr != nil {
+			return nil, loadErr
+		}
+		return Client.EvalSha(ctx, sha, keys, args...).Result()
+	}
+	return result, err
+}
+
+// evalShaIntWithRetry 执行Lua脚本并返回int结果
+func evalShaIntWithRetry(ctx context.Context, sha string, keys []string, args ...interface{}) (int, error) {
+	result, err := evalShaWithRetry(ctx, sha, keys, args...)
+	if err != nil {
+		return 0, err
+	}
+	switch v := result.(type) {
+	case int64:
+		return int(v), nil
+	case int:
+		return v, nil
+	default:
+		return 0, fmt.Errorf("unexpected result type: %T", result)
+	}
+}
+
 // SeckillResult Lua 脚本返回值
 type SeckillResult int
 
@@ -74,18 +114,9 @@ func PreDecrStock(ctx context.Context, goodsID, userID uint64) (SeckillResult, i
 	// 随机起始分段，分散压力
 	startIdx := rand.Intn(SegmentCount)
 
-	result, err := Client.EvalSha(ctx, seckillSegmentSHA, keys, userID, SegmentCount, startIdx).Int()
+	result, err := evalShaIntWithRetry(ctx, seckillSegmentSHA, keys, userID, SegmentCount, startIdx)
 	if err != nil {
-		// 脚本不存在，重新加载
-		if err == redis.Nil || err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
-			if loadErr := LoadScript(ctx); loadErr != nil {
-				return SeckillScriptError, 0, loadErr
-			}
-			result, err = Client.EvalSha(ctx, seckillSegmentSHA, keys, userID, SegmentCount, startIdx).Int()
-		}
-		if err != nil {
-			return SeckillScriptError, 0, err
-		}
+		return SeckillScriptError, 0, err
 	}
 
 	if result > 0 {
@@ -124,17 +155,9 @@ func CheckAndMark(ctx context.Context, goodsID, userID uint64) (SeckillResult, i
 	// 随机起始分段，分散压力
 	startIdx := rand.Intn(SegmentCount)
 
-	result, err := Client.EvalSha(ctx, seckillCheckSHA, keys, userID, SegmentCount, startIdx).Int()
+	result, err := evalShaIntWithRetry(ctx, seckillCheckSHA, keys, userID, SegmentCount, startIdx)
 	if err != nil {
-		if err == redis.Nil || err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
-			if loadErr := LoadScript(ctx); loadErr != nil {
-				return SeckillScriptError, 0, loadErr
-			}
-			result, err = Client.EvalSha(ctx, seckillCheckSHA, keys, userID, SegmentCount, startIdx).Int()
-		}
-		if err != nil {
-			return SeckillScriptError, 0, err
-		}
+		return SeckillScriptError, 0, err
 	}
 
 	if result > 0 {
@@ -149,17 +172,9 @@ func CheckProcessed(ctx context.Context, goodsID, userID uint64) (int, error) {
 	boughtKey := BoughtKey(goodsID)
 	processedKey := ProcessedKey(goodsID)
 
-	result, err := Client.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID).Int()
+	result, err := evalShaIntWithRetry(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID)
 	if err != nil {
-		if err == redis.Nil || err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
-			if loadErr := LoadScript(ctx); loadErr != nil {
-				return -99, loadErr
-			}
-			result, err = Client.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID).Int()
-		}
-		if err != nil {
-			return -99, err
-		}
+		return -99, err
 	}
 	return result, nil
 }
@@ -199,30 +214,26 @@ func CheckProcessedBatch(ctx context.Context, goodsID uint64, userIDs []uint64) 
 	boughtKey := BoughtKey(goodsID)
 	processedKey := ProcessedKey(goodsID)
 
-	pipe := Client.Pipeline()
-	cmds := make([]*redis.Cmd, len(userIDs))
-
-	for i, userID := range userIDs {
-		cmds[i] = pipe.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID)
+	// 执行批量脚本调用
+	execBatch := func() ([]*redis.Cmd, error) {
+		pipe := Client.Pipeline()
+		cmds := make([]*redis.Cmd, len(userIDs))
+		for i, userID := range userIDs {
+			cmds[i] = pipe.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID)
+		}
+		_, err := pipe.Exec(ctx)
+		return cmds, err
 	}
 
-	_, err := pipe.Exec(ctx)
-	if err != nil && err != redis.Nil {
-		// 脚本可能未加载，重新加载后重试
-		if err.Error() == "NOSCRIPT No matching script. Please use EVAL." {
-			if loadErr := LoadScript(ctx); loadErr != nil {
-				return nil, loadErr
-			}
-			// 重新执行
-			pipe = Client.Pipeline()
-			cmds = make([]*redis.Cmd, len(userIDs))
-			for i, userID := range userIDs {
-				cmds[i] = pipe.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID)
-			}
-			_, err = pipe.Exec(ctx)
-			if err != nil && err != redis.Nil {
-				return nil, err
-			}
+	cmds, err := execBatch()
+	if err != nil && err != redis.Nil && isNoScriptError(err) {
+		// 脚本不存在，重新加载后重试
+		if loadErr := LoadScript(ctx); loadErr != nil {
+			return nil, loadErr
+		}
+		cmds, err = execBatch()
+		if err != nil && err != redis.Nil {
+			return nil, err
 		}
 	}
 

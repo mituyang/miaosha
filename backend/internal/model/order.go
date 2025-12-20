@@ -7,6 +7,13 @@ import (
 	"gorm.io/gorm"
 )
 
+// 订单状态常量
+const (
+	OrderStatusUnpaid    uint8 = 0 // 未支付
+	OrderStatusPaid      uint8 = 1 // 已支付
+	OrderStatusCancelled uint8 = 2 // 已取消
+)
+
 // Order 订单模型
 type Order struct {
 	ID          uint64     `gorm:"primaryKey" json:"-"`
