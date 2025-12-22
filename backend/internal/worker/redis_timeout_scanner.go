@@ -175,7 +175,7 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 		// 失败的重新入队
 		expireAt := time.Now().Add(s.maxRetryDelay)
 		for _, item := range items {
-			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.SegmentID, expireAt)
+			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.SegmentID, item.Quantity, expireAt)
 		}
 		return err
 	}
@@ -186,10 +186,14 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 		cancelledItems = append(cancelledItems, itemMap[orderID])
 	}
 
-	// 批量 MySQL 返还库存（按商品分组）
+	// 批量 MySQL 返还库存（按商品分组，累加数量）
 	goodsStockMap := make(map[uint64]int)
 	for _, item := range cancelledItems {
-		goodsStockMap[item.GoodsID]++
+		quantity := item.Quantity
+		if quantity <= 0 {
+			quantity = 1
+		}
+		goodsStockMap[item.GoodsID] += quantity
 	}
 	for goodsID, count := range goodsStockMap {
 		if err := s.goodsRepo.IncrStockBatch(goodsID, count); err != nil {
@@ -219,13 +223,18 @@ func (s *RedisTimeoutScanner) cancelOrder(ctx context.Context, item redis.OrderT
 		return nil
 	}
 
+	quantity := item.Quantity
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	// 返还库存
-	_ = s.goodsRepo.IncrStock(item.GoodsID)
-	_ = redis.IncrSegmentStock(ctx, item.GoodsID, item.SegmentID)
+	_ = s.goodsRepo.IncrStockBatch(item.GoodsID, quantity)
+	_ = redis.IncrSegmentStockBy(ctx, item.GoodsID, item.SegmentID, quantity)
 
 	// 清除用户标记，允许重新抢购
-	_ = redis.ClearUserBought(ctx, item.GoodsID, item.UserID)
-	_ = redis.ClearProcessed(ctx, item.GoodsID, item.UserID)
+	_ = redis.ClearUserBought(ctx, item.GoodsID, item.UserID, quantity)
+	_ = redis.ClearProcessed(ctx, item.GoodsID, item.UserID, quantity)
 
 	logger.Info.Printf("order cancelled by redis scanner: orderID=%d", item.OrderID)
 	return nil

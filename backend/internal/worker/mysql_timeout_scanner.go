@@ -103,14 +103,14 @@ func (s *MySQLTimeoutScanner) processExpiredOrders() {
 	logger.Info.Printf("MySQL fallback: processing %d expired orders", len(orders))
 
 	for _, order := range orders {
-		if err := s.cancelOrder(ctx, order.ID, order.UserID, order.GoodsID); err != nil {
+		if err := s.cancelOrder(ctx, order.ID, order.UserID, order.GoodsID, order.Quantity); err != nil {
 			logger.Error.Printf("MySQL fallback cancel order %d failed: %v", order.ID, err)
 		}
 	}
 }
 
 // cancelOrder 取消订单
-func (s *MySQLTimeoutScanner) cancelOrder(ctx context.Context, orderID, userID, goodsID uint64) error {
+func (s *MySQLTimeoutScanner) cancelOrder(ctx context.Context, orderID, userID, goodsID uint64, quantity int) error {
 	// 使用 CAS 更新，只有 status=0 才能取消
 	affected, err := s.orderRepo.CancelOrder(orderID, time.Now())
 	if err != nil {
@@ -122,13 +122,17 @@ func (s *MySQLTimeoutScanner) cancelOrder(ctx context.Context, orderID, userID, 
 		return nil
 	}
 
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	// 返还库存（MySQL 兜底扫描没有 segmentID，返还到分段 0）
-	_ = s.goodsRepo.IncrStock(goodsID)
-	_ = redis.IncrSegmentStock(ctx, goodsID, 0)
+	_ = s.goodsRepo.IncrStockBatch(goodsID, quantity)
+	_ = redis.IncrSegmentStockBy(ctx, goodsID, 0, quantity)
 
 	// 清除用户标记，允许重新抢购
-	_ = redis.ClearUserBought(ctx, goodsID, userID)
-	_ = redis.ClearProcessed(ctx, goodsID, userID)
+	_ = redis.ClearUserBought(ctx, goodsID, userID, quantity)
+	_ = redis.ClearProcessed(ctx, goodsID, userID, quantity)
 
 	logger.Info.Printf("order cancelled by MySQL fallback: orderID=%d", orderID)
 	return nil

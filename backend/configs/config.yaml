@@ -19,6 +19,10 @@ redis:
   pool_size: 2000
   segment_count: 32            # 库存分段数量
 
+# 秒杀限购配置
+seckill:
+  max_buy_limit: 5             # 每用户每商品最大购买数量
+
 # Kafka 配置
 kafka:
   brokers:

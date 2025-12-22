@@ -15,6 +15,11 @@ type Config struct {
 	JWT       JWTConfig       `yaml:"jwt"`
 	Admin     AdminConfig     `yaml:"admin"`
 	Snowflake SnowflakeConfig `yaml:"snowflake"`
+	Seckill   SeckillConfig   `yaml:"seckill"`
+}
+
+type SeckillConfig struct {
+	MaxBuyLimit int `yaml:"max_buy_limit"` // 每用户每商品最大购买数量，默认 5
 }
 
 type SnowflakeConfig struct {
@@ -36,15 +41,15 @@ type ServerConfig struct {
 }
 
 type MySQLConfig struct {
-	Host              string `yaml:"host"`
-	Port              int    `yaml:"port"`
-	Database          string `yaml:"database"`
-	Username          string `yaml:"username"`
-	Password          string `yaml:"password"`
-	MaxOpenConns      int    `yaml:"max_open_conns"`
-	MaxIdleConns      int    `yaml:"max_idle_conns"`
-	ConnMaxLifetimeSec int   `yaml:"conn_max_lifetime_sec"` // 连接最大生命周期(秒)，默认3600
-	ConnMaxIdleTimeSec int   `yaml:"conn_max_idle_time_sec"` // 空闲连接超时(秒)，默认600
+	Host               string `yaml:"host"`
+	Port               int    `yaml:"port"`
+	Database           string `yaml:"database"`
+	Username           string `yaml:"username"`
+	Password           string `yaml:"password"`
+	MaxOpenConns       int    `yaml:"max_open_conns"`
+	MaxIdleConns       int    `yaml:"max_idle_conns"`
+	ConnMaxLifetimeSec int    `yaml:"conn_max_lifetime_sec"`  // 连接最大生命周期(秒)，默认3600
+	ConnMaxIdleTimeSec int    `yaml:"conn_max_idle_time_sec"` // 空闲连接超时(秒)，默认600
 }
 
 type RedisConfig struct {

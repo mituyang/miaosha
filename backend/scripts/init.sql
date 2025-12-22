@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS orders (
     
     user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
     goods_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
+    quantity INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '购买数量',
     pay_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '支付金额',
     status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '订单状态: 0-未支付, 1-已支付, 2-已取消',
     request_time DATETIME(3) NOT NULL COMMENT '用户请求时间',

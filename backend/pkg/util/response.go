@@ -6,7 +6,7 @@ const (
 	CodeParamError  = 400
 	CodeServerError = 500
 	CodeSoldOut     = 1001
-	CodeRepeatBuy   = 1002
+	CodeLimitExceed = 1002
 )
 
 // Response 统一响应结构

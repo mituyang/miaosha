@@ -39,8 +39,8 @@ export const login = (username, password) => {
 }
 
 // 秒杀下单
-export const doSeckill = (goodsId) => {
-  return api.post('/seckill/buy', { goods_id: goodsId })
+export const doSeckill = (goodsId, quantity) => {
+  return api.post('/seckill/buy', { goods_id: goodsId, quantity: quantity })
 }
 
 // 查询库存

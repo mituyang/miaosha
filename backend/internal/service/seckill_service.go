@@ -17,10 +17,10 @@ import (
 type Result int
 
 const (
-	ResultSuccess   Result = 1
-	ResultSoldOut   Result = 0
-	ResultRepeatBuy Result = -1
-	ResultError     Result = -99
+	ResultSuccess     Result = 1
+	ResultSoldOut     Result = 0
+	ResultLimitExceed Result = -1
+	ResultError       Result = -99
 )
 
 type SeckillService struct {
@@ -35,10 +35,25 @@ func NewSeckillService(cfg *config.Config) *SeckillService {
 	}
 }
 
+// GetMaxBuyLimit 获取最大限购数量
+func (s *SeckillService) GetMaxBuyLimit() int {
+	if s.cfg.Seckill.MaxBuyLimit > 0 {
+		return s.cfg.Seckill.MaxBuyLimit
+	}
+	return 5 // 默认值
+}
+
 // DoSeckill 秒杀核心逻辑: 检查资格 -> 发MQ -> Consumer扣库存
-func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, requestTime time.Time) (Result, error) {
-	// 1. 检查用户资格并标记（不扣库存）
-	result, segmentID, err := redis.CheckAndMark(ctx, goodsID, userID)
+func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, quantity int, requestTime time.Time) (Result, error) {
+	maxBuyLimit := s.GetMaxBuyLimit()
+
+	// 校验购买数量
+	if quantity <= 0 || quantity > maxBuyLimit {
+		return ResultError, fmt.Errorf("购买数量必须在 1-%d 之间", maxBuyLimit)
+	}
+
+	// 1. 检查用户资格并标记（扣库存）
+	result, segmentID, err := redis.CheckAndMark(ctx, goodsID, userID, quantity, maxBuyLimit)
 	if err != nil {
 		return ResultError, err
 	}
@@ -50,14 +65,15 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 	switch result {
 	case redis.SeckillSoldOut:
 		return ResultSoldOut, nil
-	case redis.SeckillRepeatBuy:
-		return ResultRepeatBuy, nil
+	case redis.SeckillLimitExceed:
+		return ResultLimitExceed, nil
 	case redis.SeckillSuccess:
 		// 3. 发送 Kafka 消息，异步落库
 		msg := dto.SeckillMessage{
 			UserID:      userID,
 			GoodsID:     goodsID,
 			SegmentID:   segmentID,
+			Quantity:    quantity,
 			RequestTime: requestTime.UnixMilli(),
 			CreateTime:  createTime.UnixMilli(),
 			BornTime:    time.Now().UnixMilli(), // 进入 Kafka 时间
@@ -68,8 +84,8 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 		key := []byte(fmt.Sprintf("%d", userID))
 		if err := mq.SendKafkaMsg(ctx, key, body); err != nil {
 			// Kafka 发送失败，返还库存并清除用户标记（允许重试）
-			_ = redis.IncrSegmentStock(ctx, goodsID, segmentID)
-			_ = redis.ClearUserMark(ctx, goodsID, userID)
+			_ = redis.IncrSegmentStockBy(ctx, goodsID, segmentID, quantity)
+			_ = redis.ClearUserMark(ctx, goodsID, userID, quantity)
 			return ResultError, err
 		}
 

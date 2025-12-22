@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -31,10 +32,17 @@ func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 		return
 	}
 
+	// 校验购买数量
+	maxLimit := h.svc.GetMaxBuyLimit()
+	if req.Quantity <= 0 || req.Quantity > maxLimit {
+		c.JSON(http.StatusBadRequest, util.Error(util.CodeParamError, fmt.Sprintf("购买数量必须在 1-%d 之间", maxLimit)))
+		return
+	}
+
 	// 从 JWT 中间件获取 user_id
 	userID := c.GetUint64("user_id")
 
-	result, err := h.svc.DoSeckill(c.Request.Context(), userID, req.GoodsID, requestTime)
+	result, err := h.svc.DoSeckill(c.Request.Context(), userID, req.GoodsID, req.Quantity, requestTime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
 		return
@@ -45,8 +53,8 @@ func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 		c.JSON(http.StatusOK, util.Success(dto.SeckillResponse{Message: "秒杀请求已提交，请等待结果"}))
 	case service.ResultSoldOut:
 		c.JSON(http.StatusOK, util.Error(util.CodeSoldOut, "商品已售罄"))
-	case service.ResultRepeatBuy:
-		c.JSON(http.StatusOK, util.Error(util.CodeRepeatBuy, "您已参与过此商品秒杀"))
+	case service.ResultLimitExceed:
+		c.JSON(http.StatusOK, util.Error(util.CodeLimitExceed, "超过限购数量"))
 	default:
 		c.JSON(http.StatusOK, util.Error(util.CodeServerError, "系统繁忙，请稍后重试"))
 	}

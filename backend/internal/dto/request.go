@@ -2,7 +2,8 @@ package dto
 
 // SeckillRequest 秒杀请求参数
 type SeckillRequest struct {
-	GoodsID uint64 `json:"goods_id" binding:"required"`
+	GoodsID  uint64 `json:"goods_id" binding:"required"`
+	Quantity int    `json:"quantity" binding:"required,min=1"` // 购买数量
 }
 
 // SeckillMessage MQ 消息体
@@ -10,6 +11,7 @@ type SeckillMessage struct {
 	UserID      uint64 `json:"user_id"`
 	GoodsID     uint64 `json:"goods_id"`
 	SegmentID   int    `json:"segment_id"`   // Redis 库存分段ID
+	Quantity    int    `json:"quantity"`     // 购买数量
 	RequestTime int64  `json:"request_time"` // 用户请求时间戳(毫秒)
 	CreateTime  int64  `json:"create_time"`  // Redis确认时间戳(毫秒)
 	BornTime    int64  `json:"born_time"`    // 进入Kafka时间戳(毫秒)
@@ -21,4 +23,5 @@ type OrderTimeoutMessage struct {
 	UserID    uint64 `json:"user_id"`
 	GoodsID   uint64 `json:"goods_id"`
 	SegmentID int    `json:"segment_id"` // Redis 库存分段ID
+	Quantity  int    `json:"quantity"`   // 购买数量
 }

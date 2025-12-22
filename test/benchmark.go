@@ -19,6 +19,7 @@ const (
 	BaseURL     = "http://localhost:8080"
 	AdminSecret = "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8=" // 需要与 config.yaml 中的 admin.secret 一致
 	GoodsID     = 1                                              // 测试商品ID
+	Quantity    = 5                                              // 每次购买数量
 	TokenFile   = "tokens.txt"
 )
 
@@ -58,7 +59,7 @@ type Stats struct {
 	SuccessRequests int64
 	FailedRequests  int64
 	SoldOut         int64
-	RepeatBuy       int64
+	LimitExceed     int64 // 超过限购
 	TotalLatency    int64 // 纳秒
 }
 
@@ -86,8 +87,8 @@ func warmUp() error {
 }
 
 // 执行秒杀请求
-func doSeckill(ctx context.Context, token string, goodsID int) (int, time.Duration, error) {
-	body, _ := json.Marshal(map[string]int{"goods_id": goodsID})
+func doSeckill(ctx context.Context, token string, goodsID int, quantity int) (int, time.Duration, error) {
+	body, _ := json.Marshal(map[string]int{"goods_id": goodsID, "quantity": quantity})
 	req, _ := http.NewRequestWithContext(ctx, "POST", BaseURL+"/api/seckill/buy", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -215,7 +216,7 @@ func main() {
 					idx := atomic.AddInt64(&userIndex, 1) % totalTokens
 					token := tokens[idx]
 
-					code, latency, err := doSeckill(ctx, token, GoodsID)
+					code, latency, err := doSeckill(ctx, token, GoodsID, Quantity)
 					atomic.AddInt64(&stats.TotalRequests, 1)
 					atomic.AddInt64(&stats.TotalLatency, int64(latency))
 
@@ -229,8 +230,8 @@ func main() {
 						atomic.AddInt64(&stats.SuccessRequests, 1)
 					case 1001: // 已售罄
 						atomic.AddInt64(&stats.SoldOut, 1)
-					case 1002: // 重复购买
-						atomic.AddInt64(&stats.RepeatBuy, 1)
+					case 1002: // 超过限购
+						atomic.AddInt64(&stats.LimitExceed, 1)
 					default:
 						atomic.AddInt64(&stats.FailedRequests, 1)
 					}
@@ -264,7 +265,7 @@ func main() {
 	log("总请求数:     %d", stats.TotalRequests)
 	log("成功请求:     %d", stats.SuccessRequests)
 	log("已售罄:       %d", stats.SoldOut)
-	log("重复购买:     %d", stats.RepeatBuy)
+	log("超过限购:     %d", stats.LimitExceed)
 	log("失败请求:     %d", stats.FailedRequests)
 	log("剩余库存:     %d", finalStock)
 	log("平均延迟:     %.2f ms", avgLatency)

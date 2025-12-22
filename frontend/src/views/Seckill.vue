@@ -25,10 +25,16 @@
               {{ goods.stock > 0 ? goods.stock : '已售罄' }}
             </span>
           </div>
+          <div class="quantity-selector">
+            <label>数量:</label>
+            <select v-model="goods.quantity" class="quantity-select">
+              <option v-for="n in maxBuyLimit" :key="n" :value="n">{{ n }}</option>
+            </select>
+          </div>
           <button 
             class="btn btn-primary btn-block" 
             :disabled="goods.stock <= 0 || seckilling === goods.id"
-            @click="handleSeckill(goods.id)"
+            @click="handleSeckill(goods.id, goods.quantity)"
           >
             {{ seckilling === goods.id ? '抢购中...' : (goods.stock > 0 ? '立即抢购' : '已售罄') }}
           </button>
@@ -67,10 +73,11 @@ const refreshing = ref(false)
 const seckilling = ref(null)
 const warming = ref(false)
 const adminSecret = ref('')
+const maxBuyLimit = 5  // 最大限购数量
 
 const goodsList = ref([
-  { id: 1, name: 'iPhone 15 Pro', price: 6999, stock: 0 },
-  { id: 2, name: 'MacBook Pro M3', price: 12999, stock: 0 }
+  { id: 1, name: 'iPhone 15 Pro', price: 6999, stock: 0, quantity: 1 },
+  { id: 2, name: 'MacBook Pro M3', price: 12999, stock: 0, quantity: 1 }
 ])
 
 const showToast = (message, type = 'info') => {
@@ -94,7 +101,7 @@ const refreshStock = async () => {
   }
 }
 
-const handleSeckill = async (goodsId) => {
+const handleSeckill = async (goodsId, quantity) => {
   // 本地拦截：库存为0直接返回，不发请求
   const goods = goodsList.value.find(g => g.id === goodsId)
   if (goods && goods.stock <= 0) {
@@ -102,9 +109,15 @@ const handleSeckill = async (goodsId) => {
     return
   }
 
+  // 检查数量
+  if (quantity < 1 || quantity > maxBuyLimit) {
+    showToast(`购买数量必须在 1-${maxBuyLimit} 之间`, 'error')
+    return
+  }
+
   seckilling.value = goodsId
   try {
-    const res = await doSeckill(goodsId)
+    const res = await doSeckill(goodsId, quantity)
     if (res.data.code === 0) {
       showToast('秒杀请求已提交，请在订单页查看结果', 'success')
       await refreshStock()
@@ -147,3 +160,25 @@ onMounted(() => {
   refreshStock()
 })
 </script>
+
+<style scoped>
+.quantity-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.quantity-selector label {
+  font-size: 14px;
+  color: #666;
+}
+
+.quantity-select {
+  padding: 4px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  min-width: 60px;
+}
+</style>

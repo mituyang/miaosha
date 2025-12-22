@@ -75,16 +75,27 @@ func IncrSegmentStock(ctx context.Context, goodsID uint64, segmentID int) error 
 	return Client.Incr(ctx, segmentKey).Err()
 }
 
+// IncrSegmentStockBy 增加分段库存指定数量 (订单取消时返还)
+func IncrSegmentStockBy(ctx context.Context, goodsID uint64, segmentID int, quantity int) error {
+	segmentKey := SegmentStockKey(goodsID, segmentID)
+	return Client.IncrBy(ctx, segmentKey, int64(quantity)).Err()
+}
+
 // IncrStock 增加库存到第一个分段 (用户主动取消订单时，没有分段信息)
 func IncrStock(ctx context.Context, goodsID uint64) error {
 	// 默认返还到分段0
 	return IncrSegmentStock(ctx, goodsID, 0)
 }
 
-// ClearUserBought 清除用户购买记录 (订单取消时允许重新抢购)
-func ClearUserBought(ctx context.Context, goodsID, userID uint64) error {
+// IncrStockBy 增加库存指定数量到第一个分段
+func IncrStockBy(ctx context.Context, goodsID uint64, quantity int) error {
+	return IncrSegmentStockBy(ctx, goodsID, 0, quantity)
+}
+
+// ClearUserBought 清除用户购买记录 (订单取消时减少已购数量)
+func ClearUserBought(ctx context.Context, goodsID, userID uint64, quantity int) error {
 	boughtKey := BoughtKey(goodsID)
-	return Client.HDel(ctx, boughtKey, fmt.Sprintf("%d", userID)).Err()
+	return Client.HIncrBy(ctx, boughtKey, fmt.Sprintf("%d", userID), int64(-quantity)).Err()
 }
 
 // AcquireWarmupLock 获取预热分布式锁

@@ -56,6 +56,11 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 		return ErrOrderStatusInvalid
 	}
 
+	quantity := order.Quantity
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	// 1. 取消订单
 	affected, err := s.orderRepo.CancelOrder(orderID, time.Now())
 	if err != nil {
@@ -66,19 +71,19 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 	}
 
 	// 2. 返还 MySQL 库存
-	_ = s.goodsRepo.IncrStock(order.GoodsID)
+	_ = s.goodsRepo.IncrStockBatch(order.GoodsID, quantity)
 
 	// 3. 返还 Redis 库存
-	_ = redis.IncrStock(ctx, order.GoodsID)
+	_ = redis.IncrStockBy(ctx, order.GoodsID, quantity)
 
-	// 4. 清除用户购买记录 (允许重新抢购)
-	_ = redis.ClearUserBought(ctx, order.GoodsID, userID)
+	// 4. 清除用户购买记录 (减少已购数量)
+	_ = redis.ClearUserBought(ctx, order.GoodsID, userID, quantity)
 
 	// 5. 清除已扣库存标记
 	_ = redis.ClearUserDeducted(ctx, order.GoodsID, userID)
 
-	// 6. 清除已处理标记 (允许重新抢购)
-	_ = redis.ClearProcessed(ctx, order.GoodsID, userID)
+	// 6. 清除已处理标记 (减少已处理数量)
+	_ = redis.ClearProcessed(ctx, order.GoodsID, userID, quantity)
 
 	return nil
 }

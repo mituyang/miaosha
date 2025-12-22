@@ -281,12 +281,19 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	}
 
 	// 批量 Redis 幂等检查
-	userIDs := make([]uint64, len(items))
+	checkItems := make([]redis.BatchCheckItem, len(items))
 	for i, item := range items {
-		userIDs[i] = item.msg.UserID
+		quantity := item.msg.Quantity
+		if quantity <= 0 {
+			quantity = 1
+		}
+		checkItems[i] = redis.BatchCheckItem{
+			UserID:   item.msg.UserID,
+			Quantity: quantity,
+		}
 	}
 
-	checkResults, err := redis.CheckProcessedBatch(ctx, goodsID, userIDs)
+	checkResults, err := redis.CheckProcessedBatch(ctx, goodsID, checkItems)
 	if err != nil {
 		logger.Error.Printf("batch check processed failed: goodsID=%d, err=%v", goodsID, err)
 		return
@@ -302,6 +309,16 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 
 	if len(validItems) == 0 {
 		return
+	}
+
+	// 计算总库存扣减数量
+	totalQuantity := 0
+	for _, item := range validItems {
+		quantity := item.msg.Quantity
+		if quantity <= 0 {
+			quantity = 1
+		}
+		totalQuantity += quantity
 	}
 
 	// 构建订单列表
@@ -323,11 +340,17 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			bornTime = time.UnixMilli(msg.BornTime)
 		}
 
+		quantity := msg.Quantity
+		if quantity <= 0 {
+			quantity = 1
+		}
+
 		orders = append(orders, &model.Order{
 			ID:          util.NextID(),
 			UserID:      msg.UserID,
 			GoodsID:     goodsID,
-			PayAmount:   goods.Price,
+			Quantity:    quantity,
+			PayAmount:   goods.Price * float64(quantity),
 			Status:      0,
 			RequestTime: requestTime,
 			CreateTime:  createTime,
@@ -343,7 +366,7 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	var affected int64
 	err = c.orderRepo.GetDB().Transaction(func(tx *gorm.DB) error {
 		var txErr error
-		affected, txErr = c.goodsRepo.DecrStockBatchWithTx(tx, goodsID, len(orders))
+		affected, txErr = c.goodsRepo.DecrStockBatchWithTx(tx, goodsID, totalQuantity)
 		if txErr != nil {
 			return txErr
 		}
@@ -351,8 +374,26 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 		if affected == 0 {
 			return ErrStockNotEnough
 		}
-		if int(affected) < len(orders) {
-			orders = orders[:affected]
+
+		// 如果库存不足以满足所有订单，需要按顺序截断
+		if int(affected) < totalQuantity {
+			// 按顺序累加，直到超过 affected
+			cumulative := 0
+			cutIndex := 0
+			for i, order := range orders {
+				cumulative += order.Quantity
+				if cumulative > int(affected) {
+					cutIndex = i
+					break
+				}
+				cutIndex = i + 1
+			}
+			orders = orders[:cutIndex]
+			items = items[:cutIndex]
+		}
+
+		if len(orders) == 0 {
+			return ErrStockNotEnough
 		}
 
 		if err := c.orderRepo.BatchCreateWithTx(tx, orders); err != nil {
@@ -366,13 +407,21 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			logger.Error.Printf("MySQL stock not enough: goodsID=%d, count=%d", goodsID, len(items))
 			// 清理 bought 标记、processed 标记，并返还 Redis 库存
 			for _, item := range items {
-				_ = redis.ClearUserBought(ctx, goodsID, item.msg.UserID)
-				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID)
-				_ = redis.IncrSegmentStock(ctx, goodsID, item.msg.SegmentID)
+				quantity := item.msg.Quantity
+				if quantity <= 0 {
+					quantity = 1
+				}
+				_ = redis.ClearUserBought(ctx, goodsID, item.msg.UserID, quantity)
+				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID, quantity)
+				_ = redis.IncrSegmentStockBy(ctx, goodsID, item.msg.SegmentID, quantity)
 			}
 		} else if !isDuplicateKeyError(err) {
 			for _, item := range items {
-				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID)
+				quantity := item.msg.Quantity
+				if quantity <= 0 {
+					quantity = 1
+				}
+				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID, quantity)
 			}
 			logger.Error.Printf("batch write failed: goodsID=%d, err=%v", goodsID, err)
 		}
@@ -392,6 +441,7 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			UserID:    order.UserID,
 			GoodsID:   goodsID,
 			SegmentID: items[i].msg.SegmentID,
+			Quantity:  order.Quantity,
 		}
 	}
 	expireAt := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
