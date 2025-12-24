@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,7 +20,7 @@ const (
 	BaseURL     = "http://localhost:8080"
 	AdminSecret = "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8=" // 需要与 config.yaml 中的 admin.secret 一致
 	GoodsID     = 1                                              // 测试商品ID
-	Quantity    = 5                                              // 每次购买数量
+	Quantity    = 1                                              // 每次购买数量
 	TokenFile   = "tokens.txt"
 )
 
@@ -60,6 +61,7 @@ type Stats struct {
 	FailedRequests  int64
 	SoldOut         int64
 	LimitExceed     int64 // 超过限购
+	Canceled        int64 // 压测结束时被取消的请求
 	TotalLatency    int64 // 纳秒
 }
 
@@ -221,7 +223,13 @@ func main() {
 					atomic.AddInt64(&stats.TotalLatency, int64(latency))
 
 					if err != nil {
-						atomic.AddInt64(&stats.FailedRequests, 1)
+						// 区分是主动取消还是真正的网络错误
+						if errors.Is(err, context.Canceled) {
+							atomic.AddInt64(&stats.Canceled, 1)
+						} else {
+							atomic.AddInt64(&stats.FailedRequests, 1)
+							log("请求失败(网络错误): %v", err)
+						}
 						continue
 					}
 
@@ -234,6 +242,7 @@ func main() {
 						atomic.AddInt64(&stats.LimitExceed, 1)
 					default:
 						atomic.AddInt64(&stats.FailedRequests, 1)
+						log("请求失败(业务错误): code=%d", code)
 					}
 				}
 			}
@@ -267,6 +276,7 @@ func main() {
 	log("已售罄:       %d", stats.SoldOut)
 	log("超过限购:     %d", stats.LimitExceed)
 	log("失败请求:     %d", stats.FailedRequests)
+	log("被取消请求:   %d (压测结束时进行中的请求，非真正失败)", stats.Canceled)
 	log("剩余库存:     %d", finalStock)
 	log("平均延迟:     %.2f ms", avgLatency)
 	log("TPS:          %.2f", float64(stats.TotalRequests)/actualDuration)
