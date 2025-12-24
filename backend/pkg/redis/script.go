@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/redis/go-redis/v9"
+	redisLib "github.com/redis/go-redis/v9"
 )
 
 //go:embed seckill_segment.lua
@@ -54,7 +54,7 @@ func isNoScriptError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if err == redis.Nil {
+	if err == redisLib.Nil {
 		return true
 	}
 	return strings.Contains(err.Error(), "NOSCRIPT")
@@ -220,9 +220,9 @@ func CheckProcessedBatch(ctx context.Context, goodsID uint64, items []BatchCheck
 	processedKey := ProcessedKey(goodsID)
 
 	// 执行批量脚本调用
-	execBatch := func() ([]*redis.Cmd, error) {
+	execBatch := func() ([]*redisLib.Cmd, error) {
 		pipe := Client.Pipeline()
-		cmds := make([]*redis.Cmd, len(items))
+		cmds := make([]*redisLib.Cmd, len(items))
 		for i, item := range items {
 			cmds[i] = pipe.EvalSha(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, item.UserID, item.Quantity)
 		}
@@ -231,13 +231,13 @@ func CheckProcessedBatch(ctx context.Context, goodsID uint64, items []BatchCheck
 	}
 
 	cmds, err := execBatch()
-	if err != nil && err != redis.Nil && isNoScriptError(err) {
+	if err != nil && err != redisLib.Nil && isNoScriptError(err) {
 		// 脚本不存在，重新加载后重试
 		if loadErr := LoadScript(ctx); loadErr != nil {
 			return nil, loadErr
 		}
 		cmds, err = execBatch()
-		if err != nil && err != redis.Nil {
+		if err != nil && err != redisLib.Nil {
 			return nil, err
 		}
 	}
@@ -263,6 +263,14 @@ func BatchRestoreStock(ctx context.Context, items []OrderTimeoutItem) error {
 
 	pipe := Client.Pipeline()
 
+	// 记录需要检查的字段
+	type fieldInfo struct {
+		key   string
+		field string
+	}
+	var boughtFields []fieldInfo
+	var processedFields []fieldInfo
+
 	for _, item := range items {
 		quantity := item.Quantity
 		if quantity <= 0 {
@@ -275,13 +283,53 @@ func BatchRestoreStock(ctx context.Context, items []OrderTimeoutItem) error {
 
 		// 减少用户已购数量
 		boughtKey := BoughtKey(item.GoodsID)
-		pipe.HIncrBy(ctx, boughtKey, fmt.Sprintf("%d", item.UserID), int64(-quantity))
+		field := fmt.Sprintf("%d", item.UserID)
+		pipe.HIncrBy(ctx, boughtKey, field, int64(-quantity))
+		boughtFields = append(boughtFields, fieldInfo{key: boughtKey, field: field})
 
 		// 减少已处理数量
 		processedKey := ProcessedKey(item.GoodsID)
-		pipe.HIncrBy(ctx, processedKey, fmt.Sprintf("%d", item.UserID), int64(-quantity))
+		pipe.HIncrBy(ctx, processedKey, field, int64(-quantity))
+		processedFields = append(processedFields, fieldInfo{key: processedKey, field: field})
 	}
 
-	_, err := pipe.Exec(ctx)
-	return err
+	results, err := pipe.Exec(ctx)
+	if err != nil {
+		return err
+	}
+
+	// 检查 HIncrBy 结果，删除值为 0 或以下的字段
+	// 结果顺序: [segmentIncrBy, boughtHIncrBy, processedHIncrBy] * len(items)
+	delPipe := Client.Pipeline()
+	hasDeletes := false
+
+	for i := range items {
+		// boughtHIncrBy 结果在位置 i*3+1
+		boughtIdx := i*3 + 1
+		if boughtIdx < len(results) {
+			if cmd, ok := results[boughtIdx].(*redisLib.IntCmd); ok {
+				if val, _ := cmd.Result(); val <= 0 {
+					delPipe.HDel(ctx, boughtFields[i].key, boughtFields[i].field)
+					hasDeletes = true
+				}
+			}
+		}
+
+		// processedHIncrBy 结果在位置 i*3+2
+		processedIdx := i*3 + 2
+		if processedIdx < len(results) {
+			if cmd, ok := results[processedIdx].(*redisLib.IntCmd); ok {
+				if val, _ := cmd.Result(); val <= 0 {
+					delPipe.HDel(ctx, processedFields[i].key, processedFields[i].field)
+					hasDeletes = true
+				}
+			}
+		}
+	}
+
+	if hasDeletes {
+		_, _ = delPipe.Exec(ctx)
+	}
+
+	return nil
 }
