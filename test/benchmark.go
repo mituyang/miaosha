@@ -17,6 +17,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"golang.org/x/time/rate"
 )
 
 // 配置
@@ -240,11 +241,16 @@ func main() {
 
 	// 配置参数
 	concurrency := 300   // 并发数
+	targetQPS := 10000   // 目标QPS（每秒请求数），0表示不限制
 	maxUsers := 10000000 // 最多使用的用户数
 	duration := 30       // 测试持续时间(秒)
 
 	log("=== 秒杀压测配置 ===")
-	log("并发数: %d, 最大用户数: %d, 持续时间: %ds", concurrency, maxUsers, duration)
+	if targetQPS > 0 {
+		log("并发数: %d, 目标QPS: %d, 最大用户数: %d, 持续时间: %ds", concurrency, targetQPS, maxUsers, duration)
+	} else {
+		log("并发数: %d, 目标QPS: 不限制, 最大用户数: %d, 持续时间: %ds", concurrency, maxUsers, duration)
+	}
 
 	// 1. 从文件加载 token
 	log("从 %s 加载 token...", TokenFile)
@@ -277,6 +283,12 @@ func main() {
 
 	totalTokens := int64(len(tokens))
 
+	// 创建限流器（如果设置了目标QPS）
+	var limiter *rate.Limiter
+	if targetQPS > 0 {
+		limiter = rate.NewLimiter(rate.Limit(targetQPS), targetQPS) // 令牌桶：每秒targetQPS个令牌
+	}
+
 	// 启动并发 worker
 	for range concurrency {
 		wg.Add(1)
@@ -290,6 +302,13 @@ func main() {
 				case <-ctx.Done():
 					return
 				default:
+					// 限流等待
+					if limiter != nil {
+						if err := limiter.Wait(ctx); err != nil {
+							return // context canceled
+						}
+					}
+
 					// 轮询获取用户
 					idx := atomic.AddInt64(&userIndex, 1) % totalTokens
 					token := tokens[idx]
