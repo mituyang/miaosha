@@ -31,7 +31,7 @@ kafka:
   producer:
     batch_size: 1000           # 每批最大消息数
     batch_timeout_ms: 5        # 批量等待超时(毫秒)
-    buffer_size: 200000        # 缓冲队列大小
+    buffer_size: 1000000        # 缓冲队列大小
     sender_count: 100          # 发送协程数
     max_retries: 3             # 最大重试次数
   # Consumer 配置
@@ -39,7 +39,7 @@ kafka:
     consumer_count: 64         # 消费协程数
     batch_writer_count: 32     # 写入协程数
     batch_size: 1000           # 批量写入大小
-    batch_queue_size: 200000   # 批量队列容量
+    batch_queue_size: 1000000   # 批量队列容量
     batch_flush_ms: 50         # 批量刷新间隔(毫秒)
     fetch_batch_size: 2000     # 每次拉取消息数
     fetch_timeout_ms: 50       # 拉取超时(毫秒)

@@ -58,37 +58,36 @@ type KafkaConsumer struct {
 func NewKafkaConsumer(cfg *config.Config) *KafkaConsumer {
 	kafkaCfg := cfg.Kafka.Consumer
 
-	// 应用默认值
-	// ConsumerCount 建议设置为 Kafka 分区数，过多会导致空闲和 rebalance 开销
+	// 校验配置
 	if kafkaCfg.ConsumerCount <= 0 {
-		kafkaCfg.ConsumerCount = 8 // 默认8个，适配常见的分区配置
+		panic("kafka consumer config error: consumer_count must be > 0")
 	}
 	if kafkaCfg.BatchWriterCount <= 0 {
-		kafkaCfg.BatchWriterCount = 32
+		panic("kafka consumer config error: batch_writer_count must be > 0")
 	}
 	if kafkaCfg.BatchSize <= 0 {
-		kafkaCfg.BatchSize = 1000
+		panic("kafka consumer config error: batch_size must be > 0")
 	}
 	if kafkaCfg.BatchQueueSize <= 0 {
-		kafkaCfg.BatchQueueSize = 200000
+		panic("kafka consumer config error: batch_queue_size must be > 0")
 	}
 	if kafkaCfg.BatchFlushMs <= 0 {
-		kafkaCfg.BatchFlushMs = 50
+		panic("kafka consumer config error: batch_flush_ms must be > 0")
 	}
 	if kafkaCfg.FetchBatchSize <= 0 {
-		kafkaCfg.FetchBatchSize = 2000
+		panic("kafka consumer config error: fetch_batch_size must be > 0")
 	}
 	if kafkaCfg.FetchTimeoutMs <= 0 {
-		kafkaCfg.FetchTimeoutMs = 50
+		panic("kafka consumer config error: fetch_timeout_ms must be > 0")
 	}
 	if kafkaCfg.MinBytes <= 0 {
-		kafkaCfg.MinBytes = 1
+		panic("kafka consumer config error: min_bytes must be > 0")
 	}
 	if kafkaCfg.MaxBytes <= 0 {
-		kafkaCfg.MaxBytes = 10 * 1024 * 1024 // 10MB
+		panic("kafka consumer config error: max_bytes must be > 0")
 	}
 	if kafkaCfg.CommitIntervalMs <= 0 {
-		kafkaCfg.CommitIntervalMs = 1000
+		panic("kafka consumer config error: commit_interval_ms must be > 0")
 	}
 
 	return &KafkaConsumer{
@@ -209,12 +208,12 @@ func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
 
 // enqueueOrder 将订单入队，等待批量写入（快速入队，检查延迟到写入时）
 func (c *KafkaConsumer) enqueueOrder(msg *dto.SeckillMessage, storeTime time.Time) error {
-	// 直接入队，Redis 检查延迟到批量写入时处理
+	// 阻塞等待入队，确保消息不丢失
 	select {
 	case c.batchQueue <- &kafkaOrderBatchItem{msg: msg, goods: nil, storeTime: storeTime}:
 		return nil
-	default:
-		return errors.New("order batch queue full")
+	case <-c.stopChan:
+		return errors.New("consumer stopped")
 	}
 }
 

@@ -75,7 +75,7 @@ type KafkaConfig struct {
 type KafkaProducerConfig struct {
 	BatchSize      int `yaml:"batch_size"`       // 每批最大消息数，默认 1000
 	BatchTimeoutMs int `yaml:"batch_timeout_ms"` // 批量等待超时(毫秒)，默认 5
-	BufferSize     int `yaml:"buffer_size"`      // 缓冲队列大小，默认 200000
+	BufferSize     int `yaml:"buffer_size"`      // 缓冲队列大小
 	SenderCount    int `yaml:"sender_count"`     // 发送协程数，默认 100
 	MaxRetries     int `yaml:"max_retries"`      // 最大重试次数，默认 3
 }

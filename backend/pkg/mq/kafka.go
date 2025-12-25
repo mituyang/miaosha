@@ -36,21 +36,21 @@ func InitKafkaProducer(cfg *config.KafkaConfig) error {
 	kafkaTopic = cfg.Topic
 	kafkaCfg = cfg.Producer
 
-	// 应用默认值
+	// 校验配置
 	if kafkaCfg.BatchSize <= 0 {
-		kafkaCfg.BatchSize = 1000
+		panic("kafka producer config error: batch_size must be > 0")
 	}
 	if kafkaCfg.BatchTimeoutMs <= 0 {
-		kafkaCfg.BatchTimeoutMs = 5
+		panic("kafka producer config error: batch_timeout_ms must be > 0")
 	}
 	if kafkaCfg.BufferSize <= 0 {
-		kafkaCfg.BufferSize = 200000
+		panic("kafka producer config error: buffer_size must be > 0")
 	}
 	if kafkaCfg.SenderCount <= 0 {
-		kafkaCfg.SenderCount = 100
+		panic("kafka producer config error: sender_count must be > 0")
 	}
 	if kafkaCfg.MaxRetries <= 0 {
-		kafkaCfg.MaxRetries = 3
+		panic("kafka producer config error: max_retries must be > 0")
 	}
 
 	batchTimeout := time.Duration(kafkaCfg.BatchTimeoutMs) * time.Millisecond
