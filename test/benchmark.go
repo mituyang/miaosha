@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
 // 配置
@@ -23,6 +26,7 @@ const (
 	GoodsID     = 1                                              // 测试商品ID
 	Quantity    = 1                                              // 每次购买数量
 	TokenFile   = "tokens.txt"
+	MySQLDSN    = "root:root123@tcp(127.0.0.1:3306)/seckill?parseTime=true&loc=Local"
 )
 
 // HTTP Transport（压测时动态创建，便于强制关闭）
@@ -162,6 +166,45 @@ func getStock(goodsID int) (int, error) {
 		return 0, err
 	}
 	return result.Data.Stock, nil
+}
+
+// 端到端TPS统计结果
+type E2EStats struct {
+	TotalOrders  int64
+	FirstRequest time.Time
+	LastWrite    time.Time
+	DurationSec  float64
+	E2ETPS       float64
+}
+
+// 查询端到端TPS（从MySQL统计）
+func getE2EStats(goodsID int) (*E2EStats, error) {
+	db, err := sql.Open("mysql", MySQLDSN)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	var stats E2EStats
+	err = db.QueryRow(`
+		SELECT 
+			COUNT(*) as total_orders,
+			MIN(request_time) as first_request,
+			MAX(write_time) as last_write
+		FROM orders 
+		WHERE goods_id = ?
+	`, goodsID).Scan(&stats.TotalOrders, &stats.FirstRequest, &stats.LastWrite)
+	if err != nil {
+		return nil, err
+	}
+
+	if stats.TotalOrders > 0 {
+		stats.DurationSec = stats.LastWrite.Sub(stats.FirstRequest).Seconds()
+		if stats.DurationSec > 0 {
+			stats.E2ETPS = float64(stats.TotalOrders) / stats.DurationSec
+		}
+	}
+	return &stats, nil
 }
 
 // ==================== 压测函数 ====================
@@ -321,21 +364,41 @@ func main() {
 	log("已售罄:       %d", stats.SoldOut)
 	log("超过限购:     %d", stats.LimitExceed)
 	log("失败请求:     %d", stats.FailedRequests)
-	log("被取消请求:   %d (压测结束时进行中的请求，不计入TPS)", stats.Canceled)
+	log("被取消请求:   %d (压测结束时进行中的请求，不计入统计)", stats.Canceled)
 	log("剩余库存:     %d", finalStock)
 	log("平均延迟:     %.2f ms", avgLatency)
 	log("P50延迟:      %.2f ms", latencyCollector.Percentile(50))
 	log("P95延迟:      %.2f ms", latencyCollector.Percentile(95))
 	log("P99延迟:      %.2f ms", latencyCollector.Percentile(99))
-	log("吞吐量TPS:    %.2f (基于完成请求)", float64(completedRequests)/actualDuration)
+	log("QPS:          %.2f (API响应速度)", float64(completedRequests)/actualDuration)
 
-	// 计算抢购阶段TPS
+	// 计算抢购阶段QPS
 	if stats.FirstSoldOutTime > 0 && stats.SuccessRequests > 0 {
 		seckillDuration := float64(stats.FirstSoldOutTime-startTime.UnixNano()) / 1e9 // 秒
 		log("抢购阶段耗时: %.2f s", seckillDuration)
-		log("抢购阶段TPS:  %.2f (成功请求/抢购耗时)", float64(stats.SuccessRequests)/seckillDuration)
+		log("抢购阶段QPS:  %.2f (成功请求/抢购耗时)", float64(stats.SuccessRequests)/seckillDuration)
 	} else if stats.SuccessRequests > 0 {
 		// 没有售罄，说明库存没卖完，用总时间计算
-		log("抢购阶段TPS:  %.2f (库存未售罄，基于总时间)", float64(stats.SuccessRequests)/actualDuration)
+		log("抢购阶段QPS:  %.2f (库存未售罄，基于总时间)", float64(stats.SuccessRequests)/actualDuration)
+	}
+
+	// 等待 Worker 处理完成，查询端到端 TPS
+	if stats.SuccessRequests > 0 {
+		log("")
+		log("等待订单写入MySQL完成...")
+		time.Sleep(10 * time.Second) // 等待 Worker 处理
+
+		e2eStats, err := getE2EStats(GoodsID)
+		if err != nil {
+			log("查询端到端TPS失败: %v", err)
+		} else {
+			log("")
+			log("=== 端到端TPS (订单落库) ===")
+			log("MySQL订单数:  %d", e2eStats.TotalOrders)
+			log("首个请求时间: %s", e2eStats.FirstRequest.Format("15:04:05.000"))
+			log("最后写入时间: %s", e2eStats.LastWrite.Format("15:04:05.000"))
+			log("端到端耗时:   %.2f s", e2eStats.DurationSec)
+			log("端到端TPS:    %.2f (订单从请求到落库)", e2eStats.E2ETPS)
+		}
 	}
 }
