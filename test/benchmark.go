@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,13 +57,44 @@ type Response struct {
 
 // 测试结果统计
 type Stats struct {
-	TotalRequests   int64
-	SuccessRequests int64
-	FailedRequests  int64
-	SoldOut         int64
-	LimitExceed     int64 // 超过限购
-	Canceled        int64 // 压测结束时被取消的请求
-	TotalLatency    int64 // 纳秒
+	TotalRequests    int64
+	SuccessRequests  int64
+	FailedRequests   int64
+	SoldOut          int64
+	LimitExceed      int64 // 超过限购
+	Canceled         int64 // 压测结束时被取消的请求
+	CompletedLatency int64 // 已完成请求的延迟（不含取消的，纳秒）
+	FirstSoldOutTime int64 // 第一次售罄的时间戳（纳秒），用于计算抢购阶段耗时
+}
+
+// 延迟收集器（用于计算百分位）
+type LatencyCollector struct {
+	mu        sync.Mutex
+	latencies []int64 // 纳秒
+}
+
+func (c *LatencyCollector) Add(latency int64) {
+	c.mu.Lock()
+	c.latencies = append(c.latencies, latency)
+	c.mu.Unlock()
+}
+
+func (c *LatencyCollector) Percentile(p float64) float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if len(c.latencies) == 0 {
+		return 0
+	}
+
+	// 排序
+	sorted := make([]int64, len(c.latencies))
+	copy(sorted, c.latencies)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+
+	// 计算百分位索引
+	idx := int(float64(len(sorted)-1) * p / 100)
+	return float64(sorted[idx]) / 1e6 // 转换为毫秒
 }
 
 // ==================== 辅助函数 ====================
@@ -164,9 +196,9 @@ func main() {
 	initHTTPClient()
 
 	// 配置参数
-	concurrency := 2000  // 并发数
+	concurrency := 300   // 并发数
 	maxUsers := 10000000 // 最多使用的用户数
-	duration := 40       // 测试持续时间(秒)
+	duration := 30       // 测试持续时间(秒)
 
 	log("=== 秒杀压测配置 ===")
 	log("并发数: %d, 最大用户数: %d, 持续时间: %ds", concurrency, maxUsers, duration)
@@ -193,6 +225,7 @@ func main() {
 	// 3. 开始压测
 	log("创建 goroutine...")
 	var stats Stats
+	var latencyCollector LatencyCollector
 	var wg sync.WaitGroup
 	var readyWg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
@@ -220,23 +253,33 @@ func main() {
 
 					code, latency, err := doSeckill(ctx, token, GoodsID, Quantity)
 					atomic.AddInt64(&stats.TotalRequests, 1)
-					atomic.AddInt64(&stats.TotalLatency, int64(latency))
 
 					if err != nil {
 						// 区分是主动取消还是真正的网络错误
 						if errors.Is(err, context.Canceled) {
 							atomic.AddInt64(&stats.Canceled, 1)
+							// 被取消的请求不计入延迟统计
 						} else {
 							atomic.AddInt64(&stats.FailedRequests, 1)
+							atomic.AddInt64(&stats.CompletedLatency, int64(latency))
+							latencyCollector.Add(int64(latency))
 							log("请求失败(网络错误): %v", err)
 						}
 						continue
 					}
 
+					// 只有完成的请求才计入延迟
+					atomic.AddInt64(&stats.CompletedLatency, int64(latency))
+					latencyCollector.Add(int64(latency))
+
 					switch code {
 					case 0: // 成功
 						atomic.AddInt64(&stats.SuccessRequests, 1)
 					case 1001: // 已售罄
+						// 记录第一次售罄时间
+						if atomic.LoadInt64(&stats.FirstSoldOutTime) == 0 {
+							atomic.CompareAndSwapInt64(&stats.FirstSoldOutTime, 0, time.Now().UnixNano())
+						}
 						atomic.AddInt64(&stats.SoldOut, 1)
 					case 1002: // 超过限购
 						atomic.AddInt64(&stats.LimitExceed, 1)
@@ -266,19 +309,33 @@ func main() {
 
 	// 4. 输出结果
 	finalStock, _ := getStock(GoodsID)
-	avgLatency := float64(stats.TotalLatency) / float64(stats.TotalRequests) / 1e6 // ms
+	completedRequests := stats.TotalRequests - stats.Canceled
+	avgLatency := float64(stats.CompletedLatency) / float64(completedRequests) / 1e6 // ms
 
 	log("")
 	log("=== 压测结果 ===")
 	log("实际耗时:     %.2f s", actualDuration)
 	log("总请求数:     %d", stats.TotalRequests)
+	log("完成请求:     %d", completedRequests)
 	log("成功请求:     %d", stats.SuccessRequests)
 	log("已售罄:       %d", stats.SoldOut)
 	log("超过限购:     %d", stats.LimitExceed)
 	log("失败请求:     %d", stats.FailedRequests)
-	log("被取消请求:   %d (压测结束时进行中的请求，非真正失败)", stats.Canceled)
+	log("被取消请求:   %d (压测结束时进行中的请求，不计入TPS)", stats.Canceled)
 	log("剩余库存:     %d", finalStock)
 	log("平均延迟:     %.2f ms", avgLatency)
-	log("TPS:          %.2f", float64(stats.TotalRequests)/actualDuration)
-	log("成功TPS:      %.2f", float64(stats.SuccessRequests)/actualDuration)
+	log("P50延迟:      %.2f ms", latencyCollector.Percentile(50))
+	log("P95延迟:      %.2f ms", latencyCollector.Percentile(95))
+	log("P99延迟:      %.2f ms", latencyCollector.Percentile(99))
+	log("吞吐量TPS:    %.2f (基于完成请求)", float64(completedRequests)/actualDuration)
+
+	// 计算抢购阶段TPS
+	if stats.FirstSoldOutTime > 0 && stats.SuccessRequests > 0 {
+		seckillDuration := float64(stats.FirstSoldOutTime-startTime.UnixNano()) / 1e9 // 秒
+		log("抢购阶段耗时: %.2f s", seckillDuration)
+		log("抢购阶段TPS:  %.2f (成功请求/抢购耗时)", float64(stats.SuccessRequests)/seckillDuration)
+	} else if stats.SuccessRequests > 0 {
+		// 没有售罄，说明库存没卖完，用总时间计算
+		log("抢购阶段TPS:  %.2f (库存未售罄，基于总时间)", float64(stats.SuccessRequests)/actualDuration)
+	}
 }
