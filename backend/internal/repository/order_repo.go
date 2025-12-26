@@ -144,8 +144,26 @@ func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.T
 		return nil, nil
 	}
 
+	// 先查询哪些订单是待支付状态（可以被取消）
+	var unpaidOrders []model.Order
+	err := r.db.Select("id").Where("id IN ? AND status = ?", orderIDs, model.OrderStatusUnpaid).Find(&unpaidOrders).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if len(unpaidOrders) == 0 {
+		return nil, nil
+	}
+
+	// 提取待取消的订单ID
+	unpaidIDs := make([]uint64, len(unpaidOrders))
+	for i, o := range unpaidOrders {
+		unpaidIDs[i] = o.ID
+	}
+
+	// 批量更新这些订单状态
 	result := r.db.Model(&model.Order{}).
-		Where("id IN ? AND status = ?", orderIDs, model.OrderStatusUnpaid).
+		Where("id IN ? AND status = ?", unpaidIDs, model.OrderStatusUnpaid).
 		Updates(map[string]interface{}{
 			"status":      model.OrderStatusCancelled,
 			"cancel_time": cancelTime,
@@ -155,21 +173,6 @@ func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.T
 		return nil, result.Error
 	}
 
-	// 没有实际取消的订单
-	if result.RowsAffected == 0 {
-		return nil, nil
-	}
-
-	// 查询本次实际被取消的订单（精确匹配 cancel_time，避免重复计算之前已取消的订单）
-	var cancelledOrders []model.Order
-	err := r.db.Where("id IN ? AND status = ? AND cancel_time = ?", orderIDs, model.OrderStatusCancelled, cancelTime).Find(&cancelledOrders).Error
-	if err != nil {
-		return nil, err
-	}
-
-	cancelledIDs := make([]uint64, len(cancelledOrders))
-	for i, o := range cancelledOrders {
-		cancelledIDs[i] = o.ID
-	}
-	return cancelledIDs, nil
+	// 返回实际取消的订单ID（即之前查到的待支付订单）
+	return unpaidIDs, nil
 }
