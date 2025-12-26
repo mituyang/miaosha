@@ -155,13 +155,14 @@ func (r *OrderRepository) BatchCancelOrders(orderIDs []uint64, cancelTime time.T
 		return nil, result.Error
 	}
 
-	// 查询实际被取消的订单（只查 status=已取消 的，不用精确匹配时间）
+	// 没有实际取消的订单
 	if result.RowsAffected == 0 {
 		return nil, nil
 	}
 
+	// 查询本次实际被取消的订单（精确匹配 cancel_time，避免重复计算之前已取消的订单）
 	var cancelledOrders []model.Order
-	err := r.db.Where("id IN ? AND status = ?", orderIDs, model.OrderStatusCancelled).Find(&cancelledOrders).Error
+	err := r.db.Where("id IN ? AND status = ? AND cancel_time = ?", orderIDs, model.OrderStatusCancelled, cancelTime).Find(&cancelledOrders).Error
 	if err != nil {
 		return nil, err
 	}
