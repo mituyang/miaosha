@@ -69,6 +69,7 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 		return ResultLimitExceed, nil
 	case redis.SeckillSuccess:
 		// 3. 发送 Kafka 消息，异步落库
+		// BornTime 改由生产者在发送时通过 kafka.Message.Time 设置
 		msg := dto.SeckillMessage{
 			UserID:      userID,
 			GoodsID:     goodsID,
@@ -76,7 +77,6 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 			Quantity:    quantity,
 			RequestTime: requestTime.UnixMilli(),
 			CreateTime:  createTime.UnixMilli(),
-			BornTime:    time.Now().UnixMilli(), // 进入 Kafka 时间
 		}
 		body, _ := json.Marshal(msg)
 

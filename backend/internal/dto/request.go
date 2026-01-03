@@ -14,7 +14,7 @@ type SeckillMessage struct {
 	Quantity    int    `json:"quantity"`     // 购买数量
 	RequestTime int64  `json:"request_time"` // 用户请求时间戳(毫秒)
 	CreateTime  int64  `json:"create_time"`  // Redis确认时间戳(毫秒)
-	BornTime    int64  `json:"born_time"`    // 进入Kafka时间戳(毫秒)
+	// BornTime 改用 kafka.Message.Time 字段，在发送时由生产者设置
 }
 
 // OrderTimeoutMessage 订单超时消息

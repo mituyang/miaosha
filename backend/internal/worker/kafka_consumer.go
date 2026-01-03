@@ -25,6 +25,7 @@ import (
 type kafkaOrderBatchItem struct {
 	msg       *dto.SeckillMessage
 	goods     *model.Goods
+	bornTime  time.Time // 生产者发送时间（从 kafka.Message.Time 获取）
 	storeTime time.Time // 从 Kafka 消费的时间
 }
 
@@ -191,6 +192,8 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
 	// 记录从 Kafka 消费的时间
 	storeTime := time.Now()
+	// 从 kafka.Message.Time 获取生产者发送时间（BornTime）
+	bornTime := msg.Time
 
 	var seckillMsg dto.SeckillMessage
 	if err := json.Unmarshal(msg.Value, &seckillMsg); err != nil {
@@ -203,14 +206,14 @@ func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
 		return nil
 	}
 
-	return c.enqueueOrder(&seckillMsg, storeTime)
+	return c.enqueueOrder(&seckillMsg, bornTime, storeTime)
 }
 
 // enqueueOrder 将订单入队，等待批量写入（快速入队，检查延迟到写入时）
-func (c *KafkaConsumer) enqueueOrder(msg *dto.SeckillMessage, storeTime time.Time) error {
+func (c *KafkaConsumer) enqueueOrder(msg *dto.SeckillMessage, bornTime time.Time, storeTime time.Time) error {
 	// 阻塞等待入队，确保消息不丢失
 	select {
-	case c.batchQueue <- &kafkaOrderBatchItem{msg: msg, goods: nil, storeTime: storeTime}:
+	case c.batchQueue <- &kafkaOrderBatchItem{msg: msg, goods: nil, bornTime: bornTime, storeTime: storeTime}:
 		return nil
 	case <-c.stopChan:
 		return errors.New("consumer stopped")
@@ -333,12 +336,6 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			createTime = time.UnixMilli(msg.CreateTime)
 		}
 
-		// 解析 born_time（进入 Kafka 的时间）
-		bornTime := time.Now()
-		if msg.BornTime > 0 {
-			bornTime = time.UnixMilli(msg.BornTime)
-		}
-
 		quantity := msg.Quantity
 		if quantity <= 0 {
 			quantity = 1
@@ -353,7 +350,7 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			Status:      0,
 			RequestTime: requestTime,
 			CreateTime:  createTime,
-			BornTime:    bornTime,       // 进入 Kafka 时间
+			BornTime:    item.bornTime,  // 从 kafka.Message.Time 获取
 			StoreTime:   item.storeTime, // 从 Kafka 消费时间
 			WriteTime:   writeTime,
 		})

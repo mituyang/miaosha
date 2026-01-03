@@ -123,12 +123,16 @@ func sendKafkaBatch(msgs []*kafkaMsg) {
 		return
 	}
 
+	// 记录发送时间（BornTime）
+	bornTime := time.Now()
+
 	// 构建 Kafka 消息
 	kafkaMsgs := make([]kafka.Message, len(msgs))
 	for i, m := range msgs {
 		kafkaMsgs[i] = kafka.Message{
 			Key:   m.key,
 			Value: m.value,
+			Time:  bornTime, // 真正的发送时间
 		}
 	}
 
