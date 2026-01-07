@@ -122,7 +122,7 @@ func (c *KafkaConsumer) Start() error {
 			MinBytes:       c.kafkaCfg.MinBytes,
 			MaxBytes:       c.kafkaCfg.MaxBytes,
 			CommitInterval: commitInterval,
-			StartOffset:    kafka.LastOffset,
+			StartOffset:    kafka.FirstOffset,
 		})
 		c.readers = append(c.readers, reader)
 
