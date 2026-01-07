@@ -110,19 +110,16 @@ func (c *KafkaConsumer) Start() error {
 		go c.startBatchWriter()
 	}
 
-	commitInterval := time.Duration(c.kafkaCfg.CommitIntervalMs) * time.Millisecond
-
 	// 启动多个并行消费协程，每个协程创建独立的 Reader
 	// 使用 Consumer Group 机制，Kafka 会自动分配分区给不同的消费者
 	for i := 0; i < c.kafkaCfg.ConsumerCount; i++ {
 		reader := kafka.NewReader(kafka.ReaderConfig{
-			Brokers:        c.cfg.Kafka.Brokers,
-			Topic:          c.cfg.Kafka.Topic,
-			GroupID:        c.cfg.Kafka.Group,
-			MinBytes:       c.kafkaCfg.MinBytes,
-			MaxBytes:       c.kafkaCfg.MaxBytes,
-			CommitInterval: commitInterval,
-			StartOffset:    kafka.FirstOffset,
+			Brokers:     c.cfg.Kafka.Brokers,
+			Topic:       c.cfg.Kafka.Topic,
+			GroupID:     c.cfg.Kafka.Group,
+			MinBytes:    c.kafkaCfg.MinBytes,
+			MaxBytes:    c.kafkaCfg.MaxBytes,
+			StartOffset: kafka.FirstOffset,
 		})
 		c.readers = append(c.readers, reader)
 
