@@ -25,8 +25,10 @@ import (
 type kafkaOrderBatchItem struct {
 	msg       *dto.SeckillMessage
 	goods     *model.Goods
-	bornTime  time.Time // 生产者发送时间（从 kafka.Message.Time 获取）
-	storeTime time.Time // 从 Kafka 消费的时间
+	bornTime  time.Time     // 生产者发送时间（从 kafka.Message.Time 获取）
+	storeTime time.Time     // 从 Kafka 消费的时间
+	reader    *kafka.Reader // 消息来源的 reader，用于提交 offset
+	kafkaMsg  kafka.Message // 原始 Kafka 消息，用于提交 offset
 }
 
 // cachedGoods 带过期时间的商品缓存
@@ -53,6 +55,9 @@ type KafkaConsumer struct {
 
 	// 商品缓存（避免重复查询 MySQL，带TTL）
 	goodsCache sync.Map
+
+	// 死信队列 writer
+	dlqWriter *kafka.Writer
 }
 
 // NewKafkaConsumer 创建 Kafka 消费者
@@ -87,8 +92,12 @@ func NewKafkaConsumer(cfg *config.Config) *KafkaConsumer {
 	if kafkaCfg.MaxBytes <= 0 {
 		panic("kafka consumer config error: max_bytes must be > 0")
 	}
-	if kafkaCfg.CommitIntervalMs <= 0 {
-		panic("kafka consumer config error: commit_interval_ms must be > 0")
+
+	// 创建死信队列 writer
+	dlqWriter := &kafka.Writer{
+		Addr:     kafka.TCP(cfg.Kafka.Brokers...),
+		Topic:    cfg.Kafka.Topic + "_dlq",
+		Balancer: &kafka.Hash{},
 	}
 
 	return &KafkaConsumer{
@@ -99,6 +108,7 @@ func NewKafkaConsumer(cfg *config.Config) *KafkaConsumer {
 		orderRepo:  repository.NewOrderRepository(database.DB),
 		stopChan:   make(chan struct{}),
 		batchQueue: make(chan *kafkaOrderBatchItem, kafkaCfg.BatchQueueSize),
+		dlqWriter:  dlqWriter,
 	}
 }
 
@@ -132,7 +142,7 @@ func (c *KafkaConsumer) Start() error {
 	return nil
 }
 
-// consumeLoop 消费循环 - 批量拉取消息
+// consumeLoop 消费循环 - 批量拉取消息（不在这里提交 offset）
 func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 	defer c.wg.Done()
 
@@ -165,20 +175,10 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 				continue
 			}
 
-			// 批量处理消息
-			var lastMsg kafka.Message
+			// 批量处理消息，入队等待写入
 			for i := range messages {
-				if err := c.handleMessage(&messages[i]); err != nil {
+				if err := c.handleMessage(&messages[i], reader); err != nil {
 					logger.Error.Printf("consumer[%d] handle message failed: %v", consumerID, err)
-					continue
-				}
-				lastMsg = messages[i]
-			}
-
-			// 提交最后一条消息的 offset
-			if lastMsg.Topic != "" {
-				if err := reader.CommitMessages(context.Background(), lastMsg); err != nil {
-					logger.Error.Printf("consumer[%d] commit message failed: %v", consumerID, err)
 				}
 			}
 		}
@@ -186,7 +186,7 @@ func (c *KafkaConsumer) consumeLoop(reader *kafka.Reader, consumerID int) {
 }
 
 // handleMessage 处理单条消息
-func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
+func (c *KafkaConsumer) handleMessage(msg *kafka.Message, reader *kafka.Reader) error {
 	// 记录从 Kafka 消费的时间
 	storeTime := time.Now()
 	// 从 kafka.Message.Time 获取生产者发送时间（BornTime）
@@ -195,7 +195,8 @@ func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
 	var seckillMsg dto.SeckillMessage
 	if err := json.Unmarshal(msg.Value, &seckillMsg); err != nil {
 		logger.Error.Printf("unmarshal message failed: %v", err)
-		return nil // 解析失败，跳过
+		c.sendToDLQ(msg, "unmarshal_failed")
+		return nil
 	}
 
 	// 跳过空消息
@@ -203,14 +204,28 @@ func (c *KafkaConsumer) handleMessage(msg *kafka.Message) error {
 		return nil
 	}
 
-	return c.enqueueOrder(&seckillMsg, bornTime, storeTime)
+	return c.enqueueOrder(&seckillMsg, bornTime, storeTime, reader, *msg)
 }
 
-// enqueueOrder 将订单入队，等待批量写入（快速入队，检查延迟到写入时）
-func (c *KafkaConsumer) enqueueOrder(msg *dto.SeckillMessage, bornTime time.Time, storeTime time.Time) error {
-	// 阻塞等待入队，确保消息不丢失
+// sendToDLQ 发送消息到死信队列
+func (c *KafkaConsumer) sendToDLQ(msg *kafka.Message, reason string) {
+	dlqMsg := kafka.Message{
+		Key:   msg.Key,
+		Value: msg.Value,
+		Headers: []kafka.Header{
+			{Key: "dlq_reason", Value: []byte(reason)},
+			{Key: "original_topic", Value: []byte(msg.Topic)},
+		},
+	}
+	if err := c.dlqWriter.WriteMessages(context.Background(), dlqMsg); err != nil {
+		logger.Error.Printf("send to DLQ failed: %v", err)
+	}
+}
+
+// enqueueOrder 将订单入队，等待批量写入
+func (c *KafkaConsumer) enqueueOrder(msg *dto.SeckillMessage, bornTime time.Time, storeTime time.Time, reader *kafka.Reader, kafkaMsg kafka.Message) error {
 	select {
-	case c.batchQueue <- &kafkaOrderBatchItem{msg: msg, goods: nil, bornTime: bornTime, storeTime: storeTime}:
+	case c.batchQueue <- &kafkaOrderBatchItem{msg: msg, bornTime: bornTime, storeTime: storeTime, reader: reader, kafkaMsg: kafkaMsg}:
 		return nil
 	case <-c.stopChan:
 		return errors.New("consumer stopped")
@@ -262,13 +277,19 @@ func (c *KafkaConsumer) flushBatch(batch []*kafkaOrderBatchItem) {
 		groupByGoods[item.msg.GoodsID] = append(groupByGoods[item.msg.GoodsID], item)
 	}
 
+	// 收集成功处理的消息
+	successItems := make([]*kafkaOrderBatchItem, 0, len(batch))
 	for goodsID, items := range groupByGoods {
-		c.flushGoodsBatch(goodsID, items)
+		successList := c.flushGoodsBatch(goodsID, items)
+		successItems = append(successItems, successList...)
 	}
+
+	// 按 reader 分组提交 offset
+	c.commitOffsetsByReader(successItems)
 }
 
-// flushGoodsBatch 批量写入单个商品的订单
-func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatchItem) {
+// flushGoodsBatch 批量写入单个商品的订单，返回成功处理的 items
+func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatchItem) []*kafkaOrderBatchItem {
 	ctx := context.Background()
 	writeTime := time.Now()
 
@@ -276,7 +297,10 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	goods, err := c.getGoodsCached(goodsID)
 	if err != nil {
 		logger.Error.Printf("get goods failed: goodsID=%d, err=%v", goodsID, err)
-		return
+		for _, item := range items {
+			c.sendToDLQ(&item.kafkaMsg, "get_goods_failed")
+		}
+		return nil
 	}
 
 	// 批量 Redis 幂等检查
@@ -295,19 +319,25 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	checkResults, err := redis.CheckProcessedBatch(ctx, goodsID, checkItems)
 	if err != nil {
 		logger.Error.Printf("batch check processed failed: goodsID=%d, err=%v", goodsID, err)
-		return
+		for _, item := range items {
+			c.sendToDLQ(&item.kafkaMsg, "check_processed_failed")
+		}
+		return nil
 	}
 
-	// 过滤有效订单
+	// 过滤有效订单，重复消息直接算成功
 	validItems := make([]*kafkaOrderBatchItem, 0, len(items))
+	duplicateItems := make([]*kafkaOrderBatchItem, 0)
 	for _, item := range items {
 		if checkResults[item.msg.UserID] == 1 {
 			validItems = append(validItems, item)
+		} else {
+			duplicateItems = append(duplicateItems, item)
 		}
 	}
 
 	if len(validItems) == 0 {
-		return
+		return duplicateItems
 	}
 
 	// 计算总库存扣减数量
@@ -347,13 +377,13 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			Status:      0,
 			RequestTime: requestTime,
 			CreateTime:  createTime,
-			BornTime:    item.bornTime,  // 从 kafka.Message.Time 获取
-			StoreTime:   item.storeTime, // 从 Kafka 消费时间
+			BornTime:    item.bornTime,
+			StoreTime:   item.storeTime,
 			WriteTime:   writeTime,
 		})
 	}
 
-	items = validItems // 更新 items 为有效项
+	items = validItems
 
 	// 事务：批量扣库存 + 批量创建订单
 	var affected int64
@@ -368,9 +398,7 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			return ErrStockNotEnough
 		}
 
-		// 如果库存不足以满足所有订单，需要按顺序截断
 		if int(affected) < totalQuantity {
-			// 按顺序累加，直到超过 affected
 			cumulative := 0
 			cutIndex := 0
 			for i, order := range orders {
@@ -398,7 +426,6 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	if err != nil {
 		if errors.Is(err, ErrStockNotEnough) {
 			logger.Error.Printf("MySQL stock not enough: goodsID=%d, count=%d", goodsID, len(items))
-			// 清理 bought 标记、processed 标记，并返还 Redis 库存
 			for _, item := range items {
 				quantity := item.msg.Quantity
 				if quantity <= 0 {
@@ -407,6 +434,9 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 				_ = redis.ClearUserBought(ctx, goodsID, item.msg.UserID, quantity)
 				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID, quantity)
 				_ = redis.IncrSegmentStockBy(ctx, goodsID, item.msg.SegmentID, quantity)
+			}
+			for _, item := range items {
+				c.sendToDLQ(&item.kafkaMsg, "stock_not_enough")
 			}
 		} else if !isDuplicateKeyError(err) {
 			for _, item := range items {
@@ -417,11 +447,14 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID, quantity)
 			}
 			logger.Error.Printf("batch write failed: goodsID=%d, err=%v", goodsID, err)
+			for _, item := range items {
+				c.sendToDLQ(&item.kafkaMsg, "batch_write_failed")
+			}
 		}
-		return
+		return duplicateItems
 	}
 
-	// 批量添加订单到超时队列 (Redis ZSET)
+	// 批量添加订单到超时队列
 	timeoutSeconds := c.cfg.Timeout.OrderTimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = 60
@@ -443,10 +476,36 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	}
 
 	logger.Info.Printf("batch write success: goodsID=%d, count=%d", goodsID, len(orders))
+	return append(items, duplicateItems...)
 }
 
 // ErrStockNotEnough 库存不足错误
 var ErrStockNotEnough = errors.New("stock not enough")
+
+// commitOffsetsByReader 按 reader 分组提交 offset
+func (c *KafkaConsumer) commitOffsetsByReader(items []*kafkaOrderBatchItem) {
+	if len(items) == 0 {
+		return
+	}
+
+	// 按 reader 分组，每个 reader 只提交最大 offset 的消息
+	readerMaxMsg := make(map[*kafka.Reader]kafka.Message)
+	for _, item := range items {
+		if existing, ok := readerMaxMsg[item.reader]; ok {
+			if item.kafkaMsg.Offset > existing.Offset {
+				readerMaxMsg[item.reader] = item.kafkaMsg
+			}
+		} else {
+			readerMaxMsg[item.reader] = item.kafkaMsg
+		}
+	}
+
+	for reader, msg := range readerMaxMsg {
+		if err := reader.CommitMessages(context.Background(), msg); err != nil {
+			logger.Error.Printf("commit offset failed: partition=%d, offset=%d, err=%v", msg.Partition, msg.Offset, err)
+		}
+	}
+}
 
 // getGoodsCached 从缓存获取商品信息（带TTL）
 func (c *KafkaConsumer) getGoodsCached(goodsID uint64) (*model.Goods, error) {
@@ -490,12 +549,17 @@ func (c *KafkaConsumer) Stop() error {
 	close(c.stopChan)
 	c.wg.Wait()
 
-	// 关闭所有 readers
 	for i, reader := range c.readers {
 		if reader != nil {
 			if err := reader.Close(); err != nil {
 				logger.Error.Printf("close kafka reader[%d] failed: %v", i, err)
 			}
+		}
+	}
+
+	if c.dlqWriter != nil {
+		if err := c.dlqWriter.Close(); err != nil {
+			logger.Error.Printf("close DLQ writer failed: %v", err)
 		}
 	}
 
