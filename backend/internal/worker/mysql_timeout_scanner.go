@@ -88,8 +88,8 @@ func (s *MySQLTimeoutScanner) processExpiredOrders() {
 	ctx := context.Background()
 
 	// 查询超时的待支付订单
-	// status=0 AND create_time < NOW() - INTERVAL timeout SECOND
-	threshold := time.Now().Add(-time.Duration(s.timeoutSeconds) * time.Second)
+	// status=0 AND write_time < NOW() - timeout - 1分钟（比 Redis 扫描多等1分钟，作为兜底）
+	threshold := time.Now().Add(-time.Duration(s.timeoutSeconds)*time.Second - time.Minute)
 	orders, err := s.orderRepo.FindExpiredUnpaidOrders(threshold, s.batchSize)
 	if err != nil {
 		logger.Error.Printf("find expired orders failed: %v", err)

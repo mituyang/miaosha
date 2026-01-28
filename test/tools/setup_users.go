@@ -15,7 +15,7 @@ import (
 const (
 	DSN        = "root:root123@tcp(localhost:3306)/seckill?charset=utf8mb4&parseTime=True"
 	TotalUsers = 10_000_000 // 1000万用户
-	BatchSize  = 60000      // 每批插入数量 (MySQL placeholder 限制 65535)
+	BatchSize  = 30000      // 每批插入数量 (MySQL placeholder 限制 65535, 2字段×20000=40000)
 )
 
 func main() {
@@ -81,7 +81,7 @@ func insertBatch(db *sql.DB, startIdx, count int, hashedPwd string) error {
 
 	for j := 0; j < count; j++ {
 		valueStrings = append(valueStrings, "(?, ?)")
-		username := fmt.Sprintf("test_user_%d", startIdx+j)
+		username := fmt.Sprintf("test_user_%d", startIdx+j+1)
 		valueArgs = append(valueArgs, username, hashedPwd)
 	}
 

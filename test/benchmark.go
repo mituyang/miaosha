@@ -240,8 +240,8 @@ func main() {
 	initHTTPClient()
 
 	// 配置参数
-	concurrency := 300   // 并发数
-	targetQPS := 10000   // 目标QPS（每秒请求数），0表示不限制
+	concurrency := 500   // 并发数
+	targetQPS := 20000   // 目标QPS（每秒请求数），0表示不限制
 	maxUsers := 10000000 // 最多使用的用户数
 	duration := 30       // 测试持续时间(秒)
 
