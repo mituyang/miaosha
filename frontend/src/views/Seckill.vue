@@ -93,7 +93,6 @@ const refreshStock = async () => {
         goods.stock = res.data.data.stock
       }
     }
-    showToast('库存已刷新', 'success')
   } catch (e) {
     showToast('刷新失败', 'error')
   } finally {

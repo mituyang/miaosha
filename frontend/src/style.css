@@ -197,13 +197,14 @@ body {
 }
 
 .toast {
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  animation: slideIn 0.3s ease;
-  min-width: 200px;
-  max-width: 360px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  animation: slideIn 0.25s ease;
+  min-width: 120px;
+  max-width: 280px;
 }
 
 @keyframes slideIn {

@@ -71,9 +71,9 @@
           
           <!-- 订单底部 -->
           <div class="order-card-footer">
-            <div class="order-summary">
+            <div class="order-summary" v-if="order.Status !== 2">
               共 <span class="highlight">{{ order.Quantity || 1 }}</span> 件商品，
-              实付款：<span class="total-price">¥{{ order.PayAmount.toFixed(2) }}</span>
+              {{ order.Status === 0 ? '应付款' : '实付款' }}：<span class="total-price">¥{{ order.PayAmount.toFixed(2) }}</span>
             </div>
             <div class="order-actions">
               <template v-if="order.Status === 0">
@@ -95,10 +95,6 @@
               <template v-else-if="order.Status === 1">
                 <button class="btn-action btn-review">评价</button>
                 <button class="btn-action btn-rebuy">再次购买</button>
-              </template>
-              <template v-else>
-                <button class="btn-action btn-rebuy">再次购买</button>
-                <button class="btn-action btn-delete">删除订单</button>
               </template>
             </div>
           </div>
