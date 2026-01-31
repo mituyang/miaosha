@@ -19,9 +19,13 @@ var seckillCheckScript string
 //go:embed seckill_decr.lua
 var seckillDecrScript string
 
+//go:embed token_bucket.lua
+var tokenBucketScript string
+
 var seckillSegmentSHA string
 var seckillCheckSHA string
 var seckillDecrSHA string
+var tokenBucketSHA string
 
 // LoadScript 预加载 Lua 脚本到 Redis
 func LoadScript(ctx context.Context) error {
@@ -45,6 +49,13 @@ func LoadScript(ctx context.Context) error {
 		return err
 	}
 	seckillDecrSHA = sha3
+
+	// 加载令牌桶脚本
+	sha4, err := Client.ScriptLoad(ctx, tokenBucketScript).Result()
+	if err != nil {
+		return err
+	}
+	tokenBucketSHA = sha4
 
 	return nil
 }

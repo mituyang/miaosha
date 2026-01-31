@@ -16,10 +16,18 @@ type Config struct {
 	Admin     AdminConfig     `yaml:"admin"`
 	Snowflake SnowflakeConfig `yaml:"snowflake"`
 	Seckill   SeckillConfig   `yaml:"seckill"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
 
 type SeckillConfig struct {
 	MaxBuyLimit int `yaml:"max_buy_limit"` // 每用户每商品最大购买数量，默认 5
+}
+
+type RateLimitConfig struct {
+	Enabled   bool `yaml:"enabled"`    // 是否启用限流
+	Rate      int  `yaml:"rate"`       // 令牌生成速率（每秒）
+	Capacity  int  `yaml:"capacity"`   // 桶容量（最大令牌数）
+	ExpireSec int  `yaml:"expire_sec"` // Redis key 过期时间（秒）
 }
 
 type SnowflakeConfig struct {

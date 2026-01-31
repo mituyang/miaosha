@@ -13,9 +13,6 @@ import (
 func Setup(cfg *config.Config) *gin.Engine {
 	r := gin.Default()
 
-	// 全局中间件
-	r.Use(middleware.RateLimit())
-
 	// 初始化 JWT
 	jwtInstance := jwt.NewJWT(cfg.JWT.Secret, cfg.JWT.ExpireHours)
 
@@ -45,12 +42,12 @@ func Setup(cfg *config.Config) *gin.Engine {
 			// 公开接口
 			seckill.GET("/stock/:goods_id", seckillHandler.GetStock)
 
-			// 需要认证的接口
-			seckill.POST("/buy", middleware.JWTAuth(jwtInstance), seckillHandler.DoSeckill)
+			// 需要认证的接口（带限流）
+			seckill.POST("/buy", middleware.JWTAuth(jwtInstance), middleware.RateLimit(cfg), seckillHandler.DoSeckill)
 		}
 
-		// 订单接口 (需要认证)
-		orders := api.Group("/orders", middleware.JWTAuth(jwtInstance))
+		// 订单接口 (需要认证，带限流)
+		orders := api.Group("/orders", middleware.JWTAuth(jwtInstance), middleware.RateLimit(cfg))
 		{
 			orders.GET("", orderHandler.GetOrders)
 			orders.POST("/:order_id/pay", orderHandler.PayOrder)

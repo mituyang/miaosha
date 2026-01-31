@@ -23,6 +23,13 @@ redis:
 seckill:
   max_buy_limit: 5             # 每用户每商品最大购买数量
 
+# 用户级限流配置（令牌桶算法）
+rate_limit:
+  enabled: true                # 是否启用限流
+  rate: 5                      # 令牌生成速率（每秒5个）
+  capacity: 10                 # 桶容量（最多10个令牌）
+  expire_sec: 60               # Redis key 过期时间（秒）
+
 # Kafka 配置
 kafka:
   brokers:
