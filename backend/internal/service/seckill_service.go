@@ -10,6 +10,7 @@ import (
 	"seckill/internal/dto"
 	"seckill/internal/repository"
 	"seckill/pkg/database"
+	"seckill/pkg/logger"
 	"seckill/pkg/mq"
 	"seckill/pkg/redis"
 )
@@ -82,13 +83,25 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 
 		// 使用 userID 作为 key，让消息分散到多个分区并行消费
 		key := []byte(fmt.Sprintf("%d", userID))
-		if err := mq.SendKafkaMsg(ctx, key, body); err != nil {
-			// Kafka 发送失败，返还库存并清除用户标记（允许重试）
-			_ = redis.IncrSegmentStockBy(ctx, goodsID, segmentID, quantity)
-			_ = redis.ClearUserMark(ctx, goodsID, userID, quantity)
-			return ResultError, err
-		}
 
+		// 异步发送 Kafka，不阻塞用户请求
+		go func() {
+			// 使用独立 context，避免 HTTP 请求取消影响发送
+			sendCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			if err := mq.SendKafkaMsg(sendCtx, key, body); err != nil {
+				// Kafka 发送失败，返还库存并清除用户标记
+				rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer rollbackCancel()
+				_ = redis.IncrSegmentStockBy(rollbackCtx, goodsID, segmentID, quantity)
+				_ = redis.ClearUserMark(rollbackCtx, goodsID, userID, quantity)
+				// 记录错误日志，便于排查
+				logger.Error.Printf("async send kafka failed: userID=%d, goodsID=%d, err=%v", userID, goodsID, err)
+			}
+		}()
+
+		// 立即返回成功，不等待 Kafka 发送
 		return ResultSuccess, nil
 	default:
 		return ResultError, nil

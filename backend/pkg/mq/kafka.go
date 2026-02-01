@@ -2,23 +2,26 @@ package mq
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/segmentio/kafka-go"
+	"golang.org/x/time/rate"
 
 	"seckill/internal/config"
 	"seckill/pkg/logger"
 )
 
 var (
-	kafkaWriter  *kafka.Writer
-	kafkaMsgBuf  chan *kafkaMsg
-	kafkaStopCh  chan struct{}
-	kafkaWg      sync.WaitGroup
-	kafkaTopic   string
-	kafkaBrokers []string
-	kafkaCfg     config.KafkaProducerConfig
+	kafkaWriter     *kafka.Writer
+	kafkaMsgBuf     chan *kafkaMsg
+	kafkaStopCh     chan struct{}
+	kafkaWg         sync.WaitGroup
+	kafkaTopic      string
+	kafkaBrokers    []string
+	kafkaCfg        config.KafkaProducerConfig
+	producerLimiter *rate.Limiter // 生产者限流器
 )
 
 // 最大重试次数（入队重试，非Kafka层重试）
@@ -70,6 +73,18 @@ func InitKafkaProducer(cfg *config.KafkaConfig) error {
 	// 初始化缓冲队列
 	kafkaMsgBuf = make(chan *kafkaMsg, kafkaCfg.BufferSize)
 	kafkaStopCh = make(chan struct{})
+
+	// 初始化限流器
+	if kafkaCfg.RateLimitEnabled {
+		if kafkaCfg.RateLimitQPS <= 0 {
+			panic("kafka producer config error: rate_limit_qps must be > 0 when rate_limit_enabled is true")
+		}
+		if kafkaCfg.RateLimitBurst <= 0 {
+			panic("kafka producer config error: rate_limit_burst must be > 0 when rate_limit_enabled is true")
+		}
+		producerLimiter = rate.NewLimiter(rate.Limit(kafkaCfg.RateLimitQPS), kafkaCfg.RateLimitBurst)
+		logger.Info.Printf("Kafka producer rate limiter enabled: qps=%d, burst=%d", kafkaCfg.RateLimitQPS, kafkaCfg.RateLimitBurst)
+	}
 
 	// 启动发送协程
 	for i := 0; i < kafkaCfg.SenderCount; i++ {
@@ -123,6 +138,28 @@ func sendKafkaBatch(msgs []*kafkaMsg) {
 		return
 	}
 
+	// 限流检查：批量消息需要对应数量的令牌
+	if producerLimiter != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// 为批量消息预留令牌
+		if err := producerLimiter.WaitN(ctx, len(msgs)); err != nil {
+			logger.Error.Printf("rate limit wait failed for batch: %v, count=%d", err, len(msgs))
+			// 限流失败，重新入队
+			for _, m := range msgs {
+				m.retries++
+				if m.retries <= maxEnqueueRetries {
+					select {
+					case kafkaMsgBuf <- m:
+					default:
+						logger.Error.Printf("kafka buffer full, drop message after rate limit, key=%s", string(m.key))
+					}
+				}
+			}
+			return
+		}
+	}
+
 	// 记录发送时间（BornTime）
 	bornTime := time.Now()
 
@@ -160,11 +197,20 @@ func sendKafkaBatch(msgs []*kafkaMsg) {
 
 // SendKafkaMsg 发送消息到 Kafka（缓冲+批量发送）
 func SendKafkaMsg(ctx context.Context, key, value []byte) error {
+	// 直接入队，不等待限流器
+	// 限流器在发送协程中控制实际发送速率
 	select {
 	case kafkaMsgBuf <- &kafkaMsg{key: key, value: value}:
 		return nil
 	default:
-		// 缓冲满了，降级为同步发送
+		// 缓冲满了，降级为同步发送（带限流）
+		if producerLimiter != nil {
+			limitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := producerLimiter.Wait(limitCtx); err != nil {
+				return fmt.Errorf("rate limit wait timeout: %w", err)
+			}
+		}
 		return kafkaWriter.WriteMessages(ctx, kafka.Message{
 			Key:   key,
 			Value: value,
