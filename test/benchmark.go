@@ -69,7 +69,7 @@ type Stats struct {
 	FailedRequests   int64
 	SoldOut          int64
 	LimitExceed      int64 // 超过限购
-	Canceled         int64 // 压测结束时被取消的请求
+	Canceled         int64 // 压测结束时未收到响应的请求（服务器可能已处理）
 	CompletedLatency int64 // 已完成请求的延迟（不含取消的，纳秒）
 	LastSuccessTime  int64 // 最后一次成功的时间戳（纳秒），用于计算抢购阶段耗时
 	FirstSoldOutTime int64 // 第一次售罄的时间戳（纳秒），用于参考
@@ -424,7 +424,7 @@ func generateHTMLReport(
             <tr><td>已售罄响应</td><td>%d</td></tr>
             <tr><td>超过限购</td><td>%d</td></tr>
             <tr><td>失败请求</td><td>%d</td></tr>
-            <tr><td>被取消请求</td><td>%d</td></tr>
+            <tr><td>被取消请求</td><td>%d (压测结束时未收到响应)</td></tr>
             <tr><td>抢购阶段耗时</td><td>%.3f s</td></tr>
             <tr><td>秒杀QPS</td><td>%.2f req/s</td></tr>
             <tr><td>系统QPS</td><td>%.2f req/s</td></tr>
@@ -645,7 +645,7 @@ func main() {
 						// 区分是主动取消还是真正的网络错误
 						if errors.Is(err, context.Canceled) {
 							atomic.AddInt64(&stats.Canceled, 1)
-							// 被取消的请求不计入延迟统计
+							// 压测结束时未收到响应的请求不计入延迟统计
 						} else {
 							atomic.AddInt64(&stats.FailedRequests, 1)
 							atomic.AddInt64(&stats.CompletedLatency, int64(latency))
@@ -783,7 +783,7 @@ func main() {
 	log("已售罄:       %d", stats.SoldOut)
 	log("超过限购:     %d", stats.LimitExceed)
 	log("失败请求:     %d", stats.FailedRequests)
-	log("被取消请求:   %d (压测结束时进行中的请求，不计入统计)", stats.Canceled)
+	log("被取消请求:   %d (压测结束时未收到响应，服务器可能已处理)", stats.Canceled)
 	log("剩余库存:     %d", finalStock)
 	log("平均延迟:     %.2f ms", avgLatency)
 	log("P50延迟:      %.2f ms", latencyCollector.Percentile(50))
