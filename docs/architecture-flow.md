@@ -357,4 +357,4 @@ graph TB
 | T3 | store_time | Kafka Broker 存储 | ~40ms |
 | T4 | write_time | MySQL 写入完成 | ~80ms |
 
-**端到端延迟**: T4 - T0 ≈ 80ms (P50)
+**订单落库 延迟**: T4 - T0 ≈ 80ms (P50)

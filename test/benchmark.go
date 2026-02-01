@@ -201,7 +201,7 @@ func getStock(goodsID int) (int, error) {
 	return result.Data.Stock, nil
 }
 
-// 端到端TPS统计结果
+// 订单落库 TPS统计结果
 type E2EStats struct {
 	TotalOrders  int64
 	FirstRequest time.Time
@@ -210,7 +210,7 @@ type E2EStats struct {
 	E2ETPS       float64
 }
 
-// 查询端到端TPS（从MySQL统计）
+// 查询订单落库 TPS（从MySQL统计）
 func getE2EStats(goodsID int) (*E2EStats, error) {
 	db, err := sql.Open("mysql", MySQLDSN)
 	if err != nil {
@@ -394,7 +394,7 @@ func generateHTMLReport(
                 <div class="metric-value">%.2f<span class="metric-unit">ms</span></div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">端到端TPS</div>
+                <div class="metric-label">订单落库 TPS</div>
                 <div class="metric-value">%.2f<span class="metric-unit">order/s</span></div>
             </div>
         </div>
@@ -433,7 +433,7 @@ func generateHTMLReport(
             <tr><td>P95延迟</td><td>%.2f ms</td></tr>
             <tr><td>P99延迟</td><td>%.2f ms</td></tr>
             <tr><td>MySQL订单数</td><td>%d</td></tr>
-            <tr><td>端到端TPS</td><td>%.2f order/s</td></tr>
+            <tr><td>订单落库 TPS</td><td>%.2f order/s</td></tr>
         </table>
     </div>
 
@@ -814,7 +814,7 @@ func main() {
 		log("系统QPS:      %.2f (API总吞吐)", float64(completedRequests)/actualDuration)
 	}
 
-	// 等待 Worker 处理完成，查询端到端 TPS
+	// 等待 Worker 处理完成，查询订单落库  TPS
 	var e2eStats *E2EStats
 	if stats.SuccessRequests > 0 {
 		log("")
@@ -823,16 +823,16 @@ func main() {
 
 		e2eStatsResult, err := getE2EStats(GoodsID)
 		if err != nil {
-			log("查询端到端TPS失败: %v", err)
+			log("查询订单落库 TPS失败: %v", err)
 		} else {
 			e2eStats = e2eStatsResult
 			log("")
-			log("=== 端到端TPS (订单落库) ===")
+			log("=== 订单落库 TPS (订单落库) ===")
 			log("MySQL订单数:  %d", e2eStats.TotalOrders)
 			log("首个请求时间: %s", e2eStats.FirstRequest.Format("15:04:05.000"))
 			log("最后写入时间: %s", e2eStats.LastWrite.Format("15:04:05.000"))
-			log("端到端耗时:   %.2f s", e2eStats.DurationSec)
-			log("端到端TPS:    %.2f (订单从请求到落库)", e2eStats.E2ETPS)
+			log("订单落库 耗时:   %.2f s", e2eStats.DurationSec)
+			log("订单落库 TPS:    %.2f (订单从请求到落库)", e2eStats.E2ETPS)
 		}
 	}
 
