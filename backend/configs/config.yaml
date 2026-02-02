@@ -5,7 +5,7 @@ server:
 
 mysql:
   host: 127.0.0.1
-  port: 3306
+  port: 13306
   database: seckill
   username: root
   password: root123
@@ -13,7 +13,7 @@ mysql:
   max_idle_conns: 2000
 
 redis:
-  addr: 127.0.0.1:6379
+  addr: 127.0.0.1:16379
   password: ""
   db: 0
   pool_size: 2000

@@ -14,7 +14,7 @@ services:
       MYSQL_DATABASE: seckill
       TZ: Asia/Shanghai
     ports:
-      - "3306:3306"
+      - "13306:3306"
     volumes:
       - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
       - mysql_data:/var/lib/mysql
@@ -35,7 +35,7 @@ services:
     image: redis:7-alpine
     container_name: seckill-redis
     ports:
-      - "6379:6379"
+      - "16379:6379"
     volumes:
       - redis_data:/data
     networks:

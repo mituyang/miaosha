@@ -29,7 +29,7 @@ const (
 	GoodsID     = 1                                              // 测试商品ID
 	Quantity    = 1                                              // 每次购买数量
 	TokenFile   = "tokens.txt"
-	MySQLDSN    = "root:root123@tcp(127.0.0.1:3306)/seckill?parseTime=true&loc=Local"
+	MySQLDSN    = "root:root123@tcp(127.0.0.1:13306)/seckill?parseTime=true&loc=Local"
 )
 
 // HTTP Transport（压测时动态创建，便于强制关闭）

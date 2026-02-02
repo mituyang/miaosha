@@ -1,4 +1,4 @@
-# 高性能秒杀系统
+# 高并发秒杀系统
 
 一个基于 Go + Vue 3 的高并发秒杀系统，采用 Redis + Kafka + MySQL 架构，实现了库存分段、异步削峰、超时自动取消等核心功能。
 
@@ -116,8 +116,8 @@ docker-compose logs -f
 服务地址：
 - 前端: http://localhost
 - 后端 API: http://localhost:8080
-- MySQL: localhost:3306
-- Redis: localhost:6379
+- MySQL: localhost:13306
+- Redis: localhost:16379
 - Kafka: localhost:29092
 
 ### 本地开发
@@ -418,7 +418,7 @@ CREATE TABLE goods (
 ## 常见问题
 
 ### 1. 启动失败？
-检查端口占用：3306 (MySQL), 6379 (Redis), 8080 (Backend), 80 (Frontend)
+检查端口占用：13306 (MySQL), 16379 (Redis), 8080 (Backend), 80 (Frontend)
 
 ### 2. 库存不一致？
 执行库存预热：`POST /api/admin/warmup`
