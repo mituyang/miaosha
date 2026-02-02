@@ -44,8 +44,8 @@ kafka:
     sender_count: 100          # 发送协程数
     max_retries: 3             # 最大重试次数
     rate_limit_enabled: true  # 是否启用生产者限流
-    rate_limit_qps: 5000     # 限流速率（每秒消息数）
-    rate_limit_burst: 10000   # 突发容量（允许的最大突发消息数）
+    rate_limit_qps: 20000     # 限流速率（每秒消息数）
+    rate_limit_burst: 30000   # 突发容量（允许的最大突发消息数）
   # Consumer 配置
   consumer:
     consumer_count: 64         # 消费协程数
