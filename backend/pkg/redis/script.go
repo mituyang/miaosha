@@ -192,7 +192,16 @@ func CheckProcessed(ctx context.Context, goodsID, userID uint64, quantity int) (
 // ClearUserMark 清除用户标记（MQ 发送失败时调用，减少已购数量）
 func ClearUserMark(ctx context.Context, goodsID, userID uint64, quantity int) error {
 	boughtKey := BoughtKey(goodsID)
-	return Client.HIncrBy(ctx, boughtKey, fmt.Sprintf("%d", userID), int64(-quantity)).Err()
+	field := fmt.Sprintf("%d", userID)
+	val, err := Client.HIncrBy(ctx, boughtKey, field, int64(-quantity)).Result()
+	if err != nil {
+		return err
+	}
+	// 如果值 <= 0，删除该 field
+	if val <= 0 {
+		_ = Client.HDel(ctx, boughtKey, field).Err()
+	}
+	return nil
 }
 
 // SetUserStatus 设置用户订单状态
@@ -211,7 +220,16 @@ func ClearUserDeducted(ctx context.Context, goodsID, userID uint64) error {
 // ClearProcessed 清除用户已处理标记（允许重试，减少已处理数量）
 func ClearProcessed(ctx context.Context, goodsID, userID uint64, quantity int) error {
 	processedKey := ProcessedKey(goodsID)
-	return Client.HIncrBy(ctx, processedKey, fmt.Sprintf("%d", userID), int64(-quantity)).Err()
+	field := fmt.Sprintf("%d", userID)
+	val, err := Client.HIncrBy(ctx, processedKey, field, int64(-quantity)).Result()
+	if err != nil {
+		return err
+	}
+	// 如果值 <= 0，删除该 field
+	if val <= 0 {
+		_ = Client.HDel(ctx, processedKey, field).Err()
+	}
+	return nil
 }
 
 // BatchCheckItem 批量检查项

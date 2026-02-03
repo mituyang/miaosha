@@ -37,10 +37,6 @@ func InitStock(ctx context.Context, goodsID uint64, stock int) error {
 		pipe.Set(ctx, segmentKey, segmentStock, 0)
 	}
 
-	// 同时设置总库存（用于查询）
-	stockKey := StockKey(goodsID)
-	pipe.Set(ctx, stockKey, stock, 0)
-
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -62,7 +58,7 @@ func GetStock(ctx context.Context, goodsID uint64) (int, error) {
 
 // ClearSeckillData 清理秒杀数据 (活动结束后调用)
 func ClearSeckillData(ctx context.Context, goodsID uint64) error {
-	keys := []string{StockKey(goodsID), BoughtKey(goodsID), DeductedKey(goodsID)}
+	keys := []string{BoughtKey(goodsID), DeductedKey(goodsID)}
 	for i := 0; i < SegmentCount; i++ {
 		keys = append(keys, SegmentStockKey(goodsID, i))
 	}
@@ -95,7 +91,16 @@ func IncrStockBy(ctx context.Context, goodsID uint64, quantity int) error {
 // ClearUserBought 清除用户购买记录 (订单取消时减少已购数量)
 func ClearUserBought(ctx context.Context, goodsID, userID uint64, quantity int) error {
 	boughtKey := BoughtKey(goodsID)
-	return Client.HIncrBy(ctx, boughtKey, fmt.Sprintf("%d", userID), int64(-quantity)).Err()
+	field := fmt.Sprintf("%d", userID)
+	val, err := Client.HIncrBy(ctx, boughtKey, field, int64(-quantity)).Result()
+	if err != nil {
+		return err
+	}
+	// 如果值 <= 0，删除该 field
+	if val <= 0 {
+		_ = Client.HDel(ctx, boughtKey, field).Err()
+	}
+	return nil
 }
 
 // AcquireWarmupLock 获取预热分布式锁

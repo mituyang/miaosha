@@ -4,7 +4,6 @@ import "fmt"
 
 const (
 	keyPrefix          = "seckill:"
-	stockKeyPrefix     = keyPrefix + "stock:"
 	boughtKeyPrefix    = keyPrefix + "bought:"
 	deductedKeyPrefix  = keyPrefix + "deducted:"  // 已扣库存用户集合（废弃，保留兼容）
 	processedKeyPrefix = keyPrefix + "processed:" // 已处理用户集合（Consumer 幂等）
@@ -19,11 +18,6 @@ func SetSegmentCount(count int) {
 	if count > 0 {
 		SegmentCount = count
 	}
-}
-
-// StockKey 库存 key: seckill:stock:{goodsID}
-func StockKey(goodsID uint64) string {
-	return fmt.Sprintf("%s%d", stockKeyPrefix, goodsID)
 }
 
 // BoughtKey 已购用户集合 key: seckill:bought:{goodsID}

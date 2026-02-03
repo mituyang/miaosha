@@ -65,7 +65,7 @@ type RedisConfig struct {
 	Password     string `yaml:"password"`
 	DB           int    `yaml:"db"`
 	PoolSize     int    `yaml:"pool_size"`
-	SegmentCount int    `yaml:"segment_count"` // 库存分段数量，默认 32
+	SegmentCount int    `yaml:"segment_count"` // 库存分段数量
 }
 
 type KafkaConfig struct {
