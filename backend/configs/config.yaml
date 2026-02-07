@@ -33,7 +33,7 @@ rate_limit:
 # Kafka 配置
 kafka:
   brokers:
-    - 127.0.0.1:29092
+    - 127.0.0.1:19092
   topic: seckill_orders
   group: seckill_consumer_group
   # Producer 配置

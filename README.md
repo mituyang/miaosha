@@ -113,7 +113,7 @@ docker-compose logs -f
 - 后端 API: http://localhost:8080
 - MySQL: localhost:13306
 - Redis: localhost:16379
-- Kafka: localhost:29092
+- Kafka: localhost:19092
 
 ### 本地开发
 
@@ -261,7 +261,7 @@ redis:
 ```yaml
 kafka:
   brokers:
-    - 127.0.0.1:29092
+    - 127.0.0.1:19092
   producer:
     batch_size: 1000
     batch_timeout_ms: 5
