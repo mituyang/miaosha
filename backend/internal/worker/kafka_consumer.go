@@ -124,12 +124,15 @@ func (c *KafkaConsumer) Start() error {
 	// 使用 Consumer Group 机制，Kafka 会自动分配分区给不同的消费者
 	for i := 0; i < c.kafkaCfg.ConsumerCount; i++ {
 		reader := kafka.NewReader(kafka.ReaderConfig{
-			Brokers:     c.cfg.Kafka.Brokers,
-			Topic:       c.cfg.Kafka.Topic,
-			GroupID:     c.cfg.Kafka.Group,
-			MinBytes:    c.kafkaCfg.MinBytes,
-			MaxBytes:    c.kafkaCfg.MaxBytes,
-			StartOffset: kafka.FirstOffset,
+			Brokers:           c.cfg.Kafka.Brokers,
+			Topic:             c.cfg.Kafka.Topic,
+			GroupID:           c.cfg.Kafka.Group,
+			MinBytes:          c.kafkaCfg.MinBytes,
+			MaxBytes:          c.kafkaCfg.MaxBytes,
+			StartOffset:       kafka.FirstOffset,
+			SessionTimeout:    10 * time.Second,
+			RebalanceTimeout:  5 * time.Second,
+			HeartbeatInterval: 2 * time.Second,
 		})
 		c.readers = append(c.readers, reader)
 
