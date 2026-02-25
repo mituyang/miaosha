@@ -3,6 +3,9 @@
 server:
   port: 8080
 
+startup:
+  flush_redis_on_start: false   # 是否在 API 启动时清空 Redis（生产环境建议 false）
+
 mysql:
   host: 127.0.0.1
   port: 13306
@@ -75,8 +78,8 @@ snowflake:
   epoch: 1704067200000         # 起始时间戳 (2024-01-01 00:00:00 UTC)
 
 jwt:
-  secret: "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI="
+  secret: ""                    # 必须通过环境变量 JWT_SECRET 提供
   expire_hours: 240000
 
 admin:
-  secret: "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8="
+  secret: ""                    # 必须通过环境变量 ADMIN_SECRET 提供

@@ -24,12 +24,15 @@ import (
 
 // 配置
 const (
-	BaseURL     = "http://localhost:8080"
-	AdminSecret = "tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8=" // 需要与 config.yaml 中的 admin.secret 一致
-	GoodsID     = 1                                              // 测试商品ID
-	Quantity    = 1                                              // 每次购买数量
-	TokenFile   = "tokens.txt"
-	MySQLDSN    = "root:root123@tcp(127.0.0.1:13306)/seckill?parseTime=true&loc=Local"
+	GoodsID   = 1 // 测试商品ID
+	Quantity  = 1 // 每次购买数量
+	TokenFile = "tokens.txt"
+)
+
+var (
+	BaseURL     string
+	AdminSecret string
+	MySQLDSN    string
 )
 
 // HTTP Transport（压测时动态创建，便于强制关闭）
@@ -122,6 +125,66 @@ type TimeSeriesCollector struct {
 	points []TimeSeriesPoint
 }
 
+func getEnv(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+func loadDotEnvCandidates(paths ...string) {
+	for _, p := range paths {
+		if loadDotEnvFile(p) {
+			return
+		}
+	}
+}
+
+func loadDotEnvFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		if key == "" {
+			continue
+		}
+
+		// 如果外部已显式设置，保留外部值
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, val)
+	}
+
+	return true
+}
+
+func initRuntimeConfig() {
+	// 兼容两种启动路径：
+	// 1) 在 test 目录执行：go run benchmark.go -> ../.env
+	// 2) 在仓库根执行：go run ./test/benchmark.go -> .env
+	loadDotEnvCandidates("../.env", ".env")
+
+	BaseURL = getEnv("BASE_URL", "http://localhost:8080")
+	AdminSecret = strings.TrimSpace(os.Getenv("ADMIN_SECRET"))
+	MySQLDSN = getEnv("MYSQL_DSN", "root:root123@tcp(127.0.0.1:13306)/seckill?parseTime=true&loc=Local")
+}
+
 func (c *TimeSeriesCollector) Add(point TimeSeriesPoint) {
 	c.mu.Lock()
 	c.points = append(c.points, point)
@@ -138,6 +201,10 @@ func (c *TimeSeriesCollector) GetPoints() []TimeSeriesPoint {
 
 // 预热库存
 func warmUp() error {
+	if AdminSecret == "" {
+		return fmt.Errorf("ADMIN_SECRET is required (load it from .env)")
+	}
+
 	req, _ := http.NewRequest("POST", BaseURL+"/api/admin/warmup", nil)
 	req.Header.Set("X-Admin-Secret", AdminSecret)
 
@@ -560,6 +627,8 @@ func generateHTMLReport(
 }
 
 func main() {
+	initRuntimeConfig()
+
 	// 初始化 HTTP 客户端
 	initHTTPClient()
 

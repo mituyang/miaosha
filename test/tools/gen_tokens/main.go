@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 const (
-	// JWT 配置 - 需要与 config.yaml 中的 jwt.secret 一致
-	JWTSecret  = "W6jP5ADwpuqVCtza1ftmxyS2cll1QDaYAM6aaWEkJyI=" // 请修改为你的 secret
-	TotalUsers = 10_000_000                                     // 生成 1000 万个 token
+	TotalUsers = 10_000_000 // 生成 1000 万个 token
 	OutputFile = "../tokens.txt"
 )
+
+var jwtSecret string
 
 type Claims struct {
 	UserID   uint64 `json:"user_id"`
@@ -24,6 +25,16 @@ type Claims struct {
 }
 
 func main() {
+	// 兼容两种启动路径：
+	// 1) 在 test/tools 目录执行：go run ./gen_tokens -> ../../.env
+	// 2) 在仓库根执行：go run ./test/tools/gen_tokens -> .env
+	loadDotEnvCandidates("../../.env", "../.env", ".env")
+	jwtSecret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
+
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET is required (load it from .env)")
+	}
+
 	log.Printf("开始本地生成 %d 个 token...", TotalUsers)
 	startTime := time.Now()
 
@@ -63,6 +74,55 @@ func main() {
 	log.Printf("Token 已保存到 %s", OutputFile)
 }
 
+func getEnv(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+func loadDotEnvCandidates(paths ...string) {
+	for _, p := range paths {
+		if loadDotEnvFile(p) {
+			return
+		}
+	}
+}
+
+func loadDotEnvFile(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		kv := strings.SplitN(line, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		if key == "" {
+			continue
+		}
+
+		if _, exists := os.LookupEnv(key); exists {
+			continue
+		}
+		_ = os.Setenv(key, val)
+	}
+
+	return true
+}
+
 func generateToken(userID uint64, username string, expireTime time.Time) (string, error) {
 	claims := Claims{
 		UserID:   userID,
@@ -74,5 +134,5 @@ func generateToken(userID uint64, username string, expireTime time.Time) (string
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(JWTSecret))
+	return token.SignedString([]byte(jwtSecret))
 }

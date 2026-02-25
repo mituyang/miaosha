@@ -94,6 +94,13 @@
 - Go 1.24+ (本地开发)
 - Node.js 18+ (本地开发)
 
+### 环境变量（可选）
+如需外置敏感配置，可先创建环境变量文件：
+```bash
+cp .env.example .env
+```
+`docker compose` 会自动读取项目根目录 `.env`。
+
 ### 一键启动
 
 ```bash
@@ -164,7 +171,7 @@ curl -X POST http://localhost:8080/api/auth/login \
 ### 3. 预热库存
 ```bash
 curl -X POST http://localhost:8080/api/admin/warmup \
-  -H "X-Admin-Secret: tdPrNHfDnVCq+cQv8YvyW01dni0KVQ8maB0QracsWN8="
+  -H "X-Admin-Secret: <admin-secret>"
 ```
 
 ### 4. 参与秒杀
@@ -177,7 +184,7 @@ curl -X POST http://localhost:8080/api/seckill/buy \
 
 ### 5. 查询订单
 ```bash
-curl http://localhost:8080/api/order/list \
+curl http://localhost:8080/api/orders \
   -H "Authorization: Bearer <your-token>"
 ```
 
@@ -189,10 +196,10 @@ curl http://localhost:8080/api/order/list \
 cd test/tools
 
 # 生成 10 万个测试用户
-go run setup_users.go
+go run ./setup_users
 
 # 生成 10 万个 Token
-go run gen_tokens.go
+go run ./gen_tokens
 ```
 
 ### 执行压测
@@ -250,11 +257,41 @@ go run benchmark.go
 
 主要配置文件: `backend/configs/config.yaml`
 
+### 启动安全配置（推荐）
+```yaml
+startup:
+  flush_redis_on_start: false  # 默认 false，避免重启时误清空 Redis
+```
+
 ### Redis 配置
 ```yaml
 redis:
   addr: 127.0.0.1:6379
   pool_size: 2000
+```
+
+### 环境变量覆盖（推荐生产环境）
+
+程序会优先读取环境变量覆盖配置文件中的敏感项，常用变量如下：
+
+- `MYSQL_HOST` `MYSQL_PORT` `MYSQL_DATABASE` `MYSQL_USER` `MYSQL_PASSWORD`
+- `REDIS_ADDR` `REDIS_PASSWORD` `REDIS_DB`
+- `KAFKA_BROKERS`（逗号分隔）`KAFKA_TOPIC` `KAFKA_GROUP`
+- `JWT_SECRET` `JWT_EXPIRE_HOURS`
+- `ADMIN_SECRET`
+- `SERVER_PORT`
+- `STARTUP_FLUSH_REDIS_ON_START`
+
+注意：
+- `JWT_SECRET` 和 `ADMIN_SECRET` 为必填项，程序启动时会强制校验。
+- 这两个字段不会再从 `config.yaml`/`config.docker.yaml` 读取，必须由环境变量提供（建议放在项目根目录 `.env`）。
+
+示例：
+```bash
+export MYSQL_PASSWORD='strong-password'
+export JWT_SECRET='base64-or-random-secret'
+export ADMIN_SECRET='random-admin-secret'
+export STARTUP_FLUSH_REDIS_ON_START=false
 ```
 
 ### Kafka 配置
@@ -344,11 +381,15 @@ CREATE TABLE goods (
 ### 订单接口
 
 #### 查询订单列表
-- **GET** `/api/order/list`
+- **GET** `/api/orders`
 - Headers: `Authorization: Bearer <token>`
 
 #### 支付订单
-- **POST** `/api/order/pay/:order_id`
+- **POST** `/api/orders/:order_id/pay`
+- Headers: `Authorization: Bearer <token>`
+
+#### 取消订单
+- **POST** `/api/orders/:order_id/cancel`
 - Headers: `Authorization: Bearer <token>`
 
 ## 项目结构
@@ -386,6 +427,8 @@ CREATE TABLE goods (
 ├── test/                  # 压测工具
 │   ├── benchmark.go       # 压测脚本
 │   └── tools/             # 辅助工具
+│       ├── setup_users/   # 批量创建测试用户
+│       └── gen_tokens/    # 批量生成测试 token
 └── docker-compose.yml     # Docker 编排
 ```
 
@@ -401,12 +444,9 @@ CREATE TABLE goods (
 
 ## 监控与日志
 
-日志文件位于 `logs/` 目录：
-- `backend.log` - API 服务日志
-- `worker.log` - Worker 服务日志
-- `mysql.log` - MySQL 日志
-- `redis.log` - Redis 日志
-- `kafka.log` - Kafka 日志
+应用日志位于 `logs/` 目录，文件按时间戳命名：
+- `api_YYYY-MM-DD_HH-MM-SS.log` - API 服务日志
+- `worker_YYYY-MM-DD_HH-MM-SS.log` - Worker 服务日志
 
 ## 常见问题
 

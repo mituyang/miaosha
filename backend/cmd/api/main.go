@@ -60,11 +60,13 @@ func main() {
 	}
 	logger.Info.Println("Redis connected")
 
-	// 4. 清空 Redis 数据
-	if err := redis.FlushAll(context.Background()); err != nil {
-		logger.Error.Printf("flush redis failed: %v", err)
-	} else {
-		logger.Info.Println("Redis data cleared")
+	// 4. 按配置决定是否清空 Redis 数据（默认关闭，防止误删）
+	if cfg.Startup.FlushRedisOnStart {
+		if err := redis.FlushAll(context.Background()); err != nil {
+			logger.Error.Printf("flush redis failed: %v", err)
+		} else {
+			logger.Warn.Println("Redis data cleared by startup flag")
+		}
 	}
 
 	// 5. 加载 Lua 脚本

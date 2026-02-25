@@ -58,7 +58,7 @@ func GetStock(ctx context.Context, goodsID uint64) (int, error) {
 
 // ClearSeckillData 清理秒杀数据 (活动结束后调用)
 func ClearSeckillData(ctx context.Context, goodsID uint64) error {
-	keys := []string{BoughtKey(goodsID), DeductedKey(goodsID)}
+	keys := []string{BoughtKey(goodsID), DeductedKey(goodsID), ProcessedKey(goodsID)}
 	for i := 0; i < SegmentCount; i++ {
 		keys = append(keys, SegmentStockKey(goodsID, i))
 	}

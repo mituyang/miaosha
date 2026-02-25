@@ -1,13 +1,17 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
+	Startup   StartupConfig   `yaml:"startup"`
 	MySQL     MySQLConfig     `yaml:"mysql"`
 	Redis     RedisConfig     `yaml:"redis"`
 	Kafka     KafkaConfig     `yaml:"kafka"`
@@ -17,6 +21,10 @@ type Config struct {
 	Snowflake SnowflakeConfig `yaml:"snowflake"`
 	Seckill   SeckillConfig   `yaml:"seckill"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
+}
+
+type StartupConfig struct {
+	FlushRedisOnStart bool `yaml:"flush_redis_on_start"` // 是否在 API 启动时清空 Redis（默认 false）
 }
 
 type SeckillConfig struct {
@@ -127,6 +135,127 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := applyEnvOverrides(cfg); err != nil {
+		return nil, err
+	}
+
 	Cfg = cfg
 	return cfg, nil
+}
+
+func applyEnvOverrides(cfg *Config) error {
+	if err := setIntFromEnv("SERVER_PORT", &cfg.Server.Port); err != nil {
+		return err
+	}
+	if err := setBoolFromEnv("STARTUP_FLUSH_REDIS_ON_START", &cfg.Startup.FlushRedisOnStart); err != nil {
+		return err
+	}
+
+	if v, ok := os.LookupEnv("MYSQL_HOST"); ok {
+		cfg.MySQL.Host = v
+	}
+	if err := setIntFromEnv("MYSQL_PORT", &cfg.MySQL.Port); err != nil {
+		return err
+	}
+	if v, ok := os.LookupEnv("MYSQL_DATABASE"); ok {
+		cfg.MySQL.Database = v
+	}
+	if v, ok := os.LookupEnv("MYSQL_USER"); ok {
+		cfg.MySQL.Username = v
+	}
+	if v, ok := os.LookupEnv("MYSQL_PASSWORD"); ok {
+		cfg.MySQL.Password = v
+	}
+
+	if v, ok := os.LookupEnv("REDIS_ADDR"); ok {
+		cfg.Redis.Addr = v
+	}
+	if v, ok := os.LookupEnv("REDIS_PASSWORD"); ok {
+		cfg.Redis.Password = v
+	}
+	if err := setIntFromEnv("REDIS_DB", &cfg.Redis.DB); err != nil {
+		return err
+	}
+
+	if v, ok := os.LookupEnv("KAFKA_BROKERS"); ok {
+		brokers := splitAndTrim(v, ",")
+		if len(brokers) == 0 {
+			return fmt.Errorf("invalid KAFKA_BROKERS: empty brokers")
+		}
+		cfg.Kafka.Brokers = brokers
+	}
+	if v, ok := os.LookupEnv("KAFKA_TOPIC"); ok {
+		cfg.Kafka.Topic = v
+	}
+	if v, ok := os.LookupEnv("KAFKA_GROUP"); ok {
+		cfg.Kafka.Group = v
+	}
+
+	jwtSecret, err := requireNonEmptyEnv("JWT_SECRET")
+	if err != nil {
+		return err
+	}
+	cfg.JWT.Secret = jwtSecret
+
+	if err := setIntFromEnv("JWT_EXPIRE_HOURS", &cfg.JWT.ExpireHours); err != nil {
+		return err
+	}
+
+	adminSecret, err := requireNonEmptyEnv("ADMIN_SECRET")
+	if err != nil {
+		return err
+	}
+	cfg.Admin.Secret = adminSecret
+
+	return nil
+}
+
+func requireNonEmptyEnv(name string) (string, error) {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return "", fmt.Errorf("%s is required and must be provided via environment (e.g. .env)", name)
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", fmt.Errorf("%s is required and cannot be empty", name)
+	}
+	return v, nil
+}
+
+func setIntFromEnv(name string, target *int) error {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	*target = n
+	return nil
+}
+
+func setBoolFromEnv(name string, target *bool) error {
+	v, ok := os.LookupEnv(name)
+	if !ok {
+		return nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return fmt.Errorf("invalid %s: %w", name, err)
+	}
+	*target = b
+	return nil
+}
+
+func splitAndTrim(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
