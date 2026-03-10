@@ -2,6 +2,10 @@
 node_modules/
 logs/
 bin/
+!backend/bin/
+backend/bin/*
+!backend/bin/kafka-startup.sh
+!backend/bin/throttled-healthcheck.sh
 *.txt
 .DS_Store
 *.log
