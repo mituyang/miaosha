@@ -217,6 +217,76 @@ cd test
 go run benchmark.go
 ```
 
+### 使用 k6 压测
+
+```bash
+cd test
+
+# benchmark_k6.js 会优先读取 ../.env，其次读取当前目录 .env
+# 显式传入的环境变量优先级更高
+# 默认使用更接近 benchmark.go 的闭环模型：固定 VU，不主动节流
+k6 run benchmark_k6.js
+```
+
+覆盖默认参数示例：
+
+```bash
+cd test
+
+TOKEN_FILE=tokens_100k.txt \
+GOODS_ID=1 \
+TARGET_QPS=20000 \
+DURATION=30 \
+VUS=500 \
+k6 run benchmark_k6.js
+```
+
+如果你想在闭环模式下也按目标 QPS 主动节流：
+
+```bash
+cd test
+
+CLOSED_LOOP_THROTTLE=true \
+TARGET_QPS=20000 \
+VUS=500 \
+k6 run benchmark_k6.js
+```
+
+如果你明确要做开放模型压测，再切到 arrival-rate：
+
+```bash
+cd test
+
+EXECUTOR_MODE=arrival-rate \
+TARGET_QPS=20000 \
+PREALLOCATED_VUS=500 \
+MAX_VUS=20000 \
+k6 run benchmark_k6.js
+```
+
+常用环境变量：
+
+- `BASE_URL`: 默认 `http://localhost:8080`
+- `ADMIN_SECRET`: 必填，压测前用于调用预热接口
+- `TOKEN_FILE`: 默认 `tokens_100k.txt`
+- `GOODS_ID`: 默认 `1`
+- `QUANTITY`: 默认 `1`
+- `EXECUTOR_MODE`: 默认 `closed-loop`，可选 `arrival-rate`
+- `TARGET_QPS`: 默认 `20000`；在 `arrival-rate` 下用于恒定到达率，在闭环限速开启时用于计算 pacing
+- `DURATION`: 默认 `30`
+- `VUS`: 闭环模式默认 `500`
+- `CLOSED_LOOP_THROTTLE`: 默认 `false`；设为 `true` 时，闭环模式会按目标 QPS 主动节流
+- `PACE_MS`: 闭环限速开启时单个 VU 的节流间隔，默认按 `VUS / TARGET_QPS` 自动计算
+- `PREALLOCATED_VUS`: `arrival-rate` 模式默认 `500`
+- `MAX_VUS`: 默认 `max(PREALLOCATED_VUS, TARGET_QPS)`
+- `MAX_USERS`: 默认 `100000`
+
+说明：
+
+- `benchmark_k6.js` 主要覆盖 HTTP 压测、业务码统计和库存预热。
+- 默认会自动加载项目根目录 `.env`，方便读取 `ADMIN_SECRET`、`BASE_URL` 等配置。
+- MySQL 订单落库 TPS 这类端到端统计，仍建议继续使用 `benchmark.go`。
+
 ### 最新压测报告 (2026-01-29)
 
 **测试环境**: Mac Mini M4 + Docker
