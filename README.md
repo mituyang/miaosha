@@ -4,15 +4,15 @@
 
 ## 性能指标
 
-在 **Mac Mini M4** 本地环境（Docker 部署）下的压测结果：
+在 **Mac Mini M4** 本地环境（Docker 部署）下，基于 `k6` 闭环 `constant-vus` 模型（`500 VUs`、`30s`、`100000` 个 token）的压测结果：
 
-- **秒杀QPS**: 14,882 req/s (API 响应速度)
-- **订单落库 TPS**: 12,124 order/s (订单落库速度)
-- **平均延迟**: 33.55 ms
-- **P99延迟**: 100.75 ms
-- **成功率**: 100%
-- **测试时长**: 30 秒
-- **总请求数**: 446,964 次
+- **系统QPS**: 14,451.00 req/s
+- **成功QPS**: 14,450.90 req/s
+- **平均延迟**: 33.93 ms
+- **P95延迟**: 60.79 ms
+- **P99延迟**: 75.69 ms
+- **业务成功率**: 100%
+- **总请求数**: 433,530 次
 
 ## 技术栈
 
@@ -202,21 +202,6 @@ go run ./setup_users
 go run ./gen_tokens
 ```
 
-### 执行压测
-
-```bash
-cd test
-
-# 修改 benchmark.go 中的配置
-# - concurrency: 并发数
-# - targetQPS: 目标 QPS
-# - maxUsers: 最大用户数
-# - duration: 测试时长
-
-# 运行压测
-go run benchmark.go
-```
-
 ### 使用 k6 压测
 
 ```bash
@@ -283,45 +268,14 @@ k6 run benchmark_k6.js
 
 说明：
 
-- `benchmark_k6.js` 主要覆盖 HTTP 压测、业务码统计和库存预热。
+- `benchmark_k6.js` 是当前默认压测入口，主要覆盖 HTTP 压测、业务码统计和库存预热。
 - 默认会自动加载项目根目录 `.env`，方便读取 `ADMIN_SECRET`、`BASE_URL` 等配置。
-- MySQL 订单落库 TPS 这类端到端统计，仍建议继续使用 `benchmark.go`。
+- 每次执行会在 `test/` 目录生成 `benchmark_k6_<timestamp>.html` 和 `benchmark_k6_<timestamp>.json`。
+- `benchmark.go` 已保留为历史 Go 脚本，仅作参考，不再作为默认压测方案。
 
-### 最新压测报告 (2026-01-29)
+### 最新 k6 压测结果 (2026-03-13)
 
-**测试环境**: Mac Mini M4 + Docker
-
-**核心指标**:
-- 秒杀QPS: 14,882.21 req/s
-- 系统QPS: 14,882.09 req/s
-- 订单落库 TPS: 12,124.35 order/s
-- 平均延迟: 33.55 ms
-- P50延迟: 28.80 ms
-- P95延迟: 70.83 ms
-- P99延迟: 100.75 ms
-
-**请求统计**:
-- 实际耗时: 30.00 秒
-- 总请求数: 446,964
-- 完成请求: 446,464
-- 成功请求: 446,464
-- 成功率: 100%
-- 失败请求: 0
-- 被取消请求: 500
-
-**延迟分布**:
-- 0-10ms: 14,239 次
-- 10-20ms: 98,931 次
-- 20-50ms: 261,447 次
-- 50-100ms: 67,221 次
-- 100-200ms: 4,236 次
-- 200-500ms: 390 次
-
-**订单落库 性能**:
-- MySQL订单数: 446,964
-- 订单落库 TPS: 12,124.35 order/s (从请求到落库)
-
-详细报告请查看: `test/benchmark_report_20260129_102831.html`
+![k6 压测截图](test/benchmark_k6_2026-03-13.svg)
 
 ## 配置说明
 
@@ -495,7 +449,8 @@ CREATE TABLE goods (
 │   │   └── api.js         # API 封装
 │   └── vite.config.js
 ├── test/                  # 压测工具
-│   ├── benchmark.go       # 压测脚本
+│   ├── benchmark_k6.js    # k6 压测脚本（默认）
+│   ├── benchmark.go       # 历史 Go 压测脚本（仅保留参考）
 │   └── tools/             # 辅助工具
 │       ├── setup_users/   # 批量创建测试用户
 │       └── gen_tokens/    # 批量生成测试 token

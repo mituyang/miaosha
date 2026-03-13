@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1394" height="2020" viewBox="0 0 1394 2020">
+  <rect width="1394" height="2020" fill="#ececec" />
+  <style>
+    .mono { font-family: Menlo, Consolas, "Liberation Mono", monospace; font-size: 24px; fill: #1f1f1f; }
+    .accent { fill: #18c6d7; }
+    .orange { fill: #ff6400; }
+    .green { fill: #1fa64a; }
+  </style>
+
+  <text x="32" y="54" class="mono orange" font-size="56">    /\      Grafana</text>
+  <text x="32" y="112" class="mono orange" font-size="56">   /  \        __  __</text>
+  <text x="32" y="170" class="mono orange" font-size="56">  / /\ \      / /_/ /__</text>
+  <text x="32" y="228" class="mono orange" font-size="56"> / ____ \    / __  / _ \</text>
+  <text x="32" y="286" class="mono orange" font-size="56">/_/    \_\  /_/ /_/\___/</text>
+  <text x="250" y="286" class="mono orange" font-size="88">k6</text>
+
+  <text x="78" y="380" class="mono">execution:</text>
+  <text x="232" y="380" class="mono accent">local</text>
+  <text x="120" y="414" class="mono">script:</text>
+  <text x="232" y="414" class="mono accent">benchmark_k6.js</text>
+  <text x="120" y="448" class="mono">output:</text>
+  <text x="232" y="448" class="mono accent">-</text>
+
+  <text x="78" y="548" class="mono">scenarios:</text>
+  <text x="232" y="548" class="mono accent">(100.00%) 1 scenario, 500 max VUs, 1m0s max duration (incl. graceful stop):</text>
+  <text x="200" y="582" class="mono">* seckill_buy: 500 looping VUs for 30s (gracefulStop: 30s)</text>
+
+  <text x="8" y="648" class="mono accent">INFO[0000]</text>
+  <text x="128" y="648" class="mono">[setup] token数=100000, goods_id=1, quantity=1, 初始库存=1000000</text>
+  <text x="1088" y="648" class="mono accent">source</text>
+  <text x="1160" y="648" class="mono">=console</text>
+
+  <text x="8" y="682" class="mono accent">INFO[0030]</text>
+  <text x="128" y="682" class="mono">[teardown] 初始库存=1000000, 剩余库存=566473</text>
+  <text x="919" y="682" class="mono accent">source</text>
+  <text x="991" y="682" class="mono">=console</text>
+
+  <text x="8" y="780" class="mono">=== k6 秒杀压测结果 ===</text>
+  <text x="8" y="822" class="mono">BASE_URL:       http://localhost:8080</text>
+  <text x="8" y="856" class="mono">TOKEN_FILE:     tokens_100k.txt</text>
+  <text x="8" y="890" class="mono">tokens:         100000</text>
+  <text x="8" y="924" class="mono">duration:       30s</text>
+  <text x="8" y="958" class="mono">executor:       closed-loop constant-vus</text>
+  <text x="8" y="992" class="mono">targetQPS:      20000</text>
+  <text x="8" y="1026" class="mono">vus:            500</text>
+  <text x="8" y="1060" class="mono">closedLoopThrottle: false</text>
+  <text x="8" y="1094" class="mono">paceMs:         disabled</text>
+  <text x="8" y="1128" class="mono">preAllocatedVUs: 500</text>
+  <text x="8" y="1162" class="mono">maxVUs:         500</text>
+
+  <text x="8" y="1238" class="mono">总请求数:        433530</text>
+  <text x="8" y="1272" class="mono">成功请求:        433527</text>
+  <text x="8" y="1306" class="mono">已售罄:          0</text>
+  <text x="8" y="1340" class="mono">超过限购:        0</text>
+  <text x="8" y="1374" class="mono">触发限流:        0</text>
+  <text x="8" y="1408" class="mono">业务失败:        0</text>
+  <text x="8" y="1442" class="mono">非200响应:       0</text>
+  <text x="8" y="1476" class="mono">传输失败:        0</text>
+  <text x="8" y="1510" class="mono">响应解码失败:    0</text>
+
+  <text x="8" y="1586" class="mono">系统QPS:         14451.00 req/s</text>
+  <text x="8" y="1620" class="mono">成功QPS:         14450.90 req/s</text>
+  <text x="8" y="1654" class="mono">业务成功率:      100.00%</text>
+  <text x="8" y="1688" class="mono">解码成功率:      100.00%</text>
+
+  <text x="8" y="1764" class="mono">平均延迟:        33.93 ms</text>
+  <text x="8" y="1798" class="mono">P50延迟:         32.17 ms</text>
+  <text x="8" y="1832" class="mono">P95延迟:         60.79 ms</text>
+  <text x="8" y="1866" class="mono">P99延迟:         75.69 ms</text>
+
+  <text x="8" y="1942" class="mono">running (0m30.1s), 000/500 VUs, 433527 complete and 0 interrupted iterations</text>
+  <text x="8" y="1976" class="mono">seckill_buy</text>
+  <text x="165" y="1976" class="mono green">✓</text>
+  <text x="195" y="1976" class="mono">[======================================] 500 VUs  30s</text>
+</svg>

@@ -1,5 +1,7 @@
 package main
 
+// 历史 Go 压测脚本。默认压测入口请使用 benchmark_k6.js。
+
 import (
 	"bufio"
 	"bytes"
@@ -408,7 +410,7 @@ func generateHTMLReport(
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>秒杀压测报告</title>
+    <title>Go 秒杀压测报告（历史脚本）</title>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
@@ -435,7 +437,7 @@ func generateHTMLReport(
 </head>
 <body>
     <div class="container">
-        <h1>🚀 秒杀压测报告</h1>
+        <h1>🚀 Go 秒杀压测报告（历史脚本）</h1>
         <div class="timestamp">生成时间: %s</div>
         
         <h2>核心指标</h2>
@@ -622,7 +624,7 @@ func generateHTMLReport(
 		stats.SuccessRequests, stats.SoldOut, stats.LimitExceed, stats.FailedRequests,
 	)
 
-	filename := fmt.Sprintf("benchmark_report_%s.html", time.Now().Format("20060102_150405"))
+	filename := fmt.Sprintf("benchmark_go_report_%s.html", time.Now().Format("20060102_150405"))
 	return os.WriteFile(filename, []byte(htmlContent), 0644)
 }
 
@@ -638,7 +640,7 @@ func main() {
 	maxUsers := 10000000 // 最多使用的用户数
 	duration := 30       // 测试持续时间(秒)
 
-	log("=== 秒杀压测配置 ===")
+	log("=== Go 秒杀压测配置（历史脚本） ===")
 	if targetQPS > 0 {
 		log("并发数: %d, 目标QPS: %d, 最大用户数: %d, 持续时间: %ds", concurrency, targetQPS, maxUsers, duration)
 	} else {
@@ -752,7 +754,7 @@ func main() {
 
 	// 等待所有 goroutine 就绪
 	readyWg.Wait()
-	log("开始压测...")
+	log("开始 Go 压测...")
 	startTime := time.Now()
 	close(startCh) // 同时开始
 
@@ -844,7 +846,7 @@ func main() {
 	avgLatency := float64(stats.CompletedLatency) / float64(completedRequests) / 1e6 // ms
 
 	log("")
-	log("=== 压测结果 ===")
+	log("=== Go 压测结果（历史脚本） ===")
 	log("实际耗时:     %.2f s", actualDuration)
 	log("总请求数:     %d", stats.TotalRequests)
 	log("完成请求:     %d", completedRequests)
@@ -907,11 +909,11 @@ func main() {
 
 	// 生成HTML报告
 	log("")
-	log("生成HTML报告...")
+	log("生成 Go HTML 报告...")
 	if err := generateHTMLReport(&stats, &latencyCollector, &timeSeriesCollector, actualDuration, completedRequests, e2eStats, startTime); err != nil {
 		log("生成报告失败: %v", err)
 	} else {
-		reportFile := fmt.Sprintf("benchmark_report_%s.html", time.Now().Format("20060102_150405"))
+		reportFile := fmt.Sprintf("benchmark_go_report_%s.html", time.Now().Format("20060102_150405"))
 		log("报告已生成: %s", reportFile)
 	}
 }
