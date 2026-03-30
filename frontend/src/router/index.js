@@ -28,6 +28,14 @@ const routes = [
     name: 'Orders',
     component: () => import('../views/Orders.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/admin',
+    name: 'Admin',
+    beforeEnter() {
+      window.location.replace('/admin/')
+      return false
+    }
   }
 ]
 

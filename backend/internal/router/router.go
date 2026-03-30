@@ -19,12 +19,17 @@ func Setup(cfg *config.Config) *gin.Engine {
 	// 初始化 service 和 handler
 	seckillSvc := service.NewSeckillService(cfg)
 	seckillHandler := handler.NewSeckillHandler(seckillSvc)
+	goodsSvc := service.NewGoodsService()
+	goodsHandler := handler.NewGoodsHandler(goodsSvc)
 
 	authSvc := service.NewAuthService(jwtInstance)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	orderSvc := service.NewOrderService()
 	orderHandler := handler.NewOrderHandler(orderSvc)
+
+	adminSvc := service.NewAdminService(seckillSvc)
+	adminHandler := handler.NewAdminHandler(adminSvc)
 
 	// API 路由组
 	api := r.Group("/api")
@@ -46,6 +51,12 @@ func Setup(cfg *config.Config) *gin.Engine {
 			seckill.POST("/buy", middleware.JWTAuth(jwtInstance), middleware.RateLimit(cfg), seckillHandler.DoSeckill)
 		}
 
+		// 商品公开接口
+		goods := api.Group("/goods")
+		{
+			goods.GET("", goodsHandler.ListOnSaleGoods)
+		}
+
 		// 订单接口 (需要认证，带限流)
 		orders := api.Group("/orders", middleware.JWTAuth(jwtInstance), middleware.RateLimit(cfg))
 		{
@@ -57,8 +68,23 @@ func Setup(cfg *config.Config) *gin.Engine {
 		// 管理员接口 (Header 校验)
 		admin := api.Group("/admin", middleware.AdminAuth(cfg.Admin.Secret))
 		{
-			admin.POST("/warmup", seckillHandler.WarmUpAll)
-			admin.POST("/warmup/:goods_id", seckillHandler.WarmUp)
+			admin.GET("/ping", adminHandler.Ping)
+			admin.GET("/goods", adminHandler.ListGoods)
+			admin.POST("/goods", adminHandler.CreateGoods)
+			admin.PUT("/goods/:goods_id", adminHandler.UpdateGoods)
+			admin.DELETE("/goods/:goods_id", adminHandler.DeleteGoods)
+
+			admin.GET("/orders", adminHandler.ListOrders)
+			admin.GET("/orders/:order_id", adminHandler.GetOrderDetail)
+
+			admin.GET("/users", adminHandler.ListUsers)
+			admin.PUT("/users/:user_id/status", adminHandler.UpdateUserStatus)
+
+			admin.POST("/warmup", adminHandler.WarmUpAll)
+			admin.POST("/warmup/:goods_id", adminHandler.WarmUpGoods)
+
+			admin.GET("/stats", adminHandler.GetStats)
+			admin.POST("/stats/rebuild", adminHandler.RebuildStats)
 		}
 	}
 

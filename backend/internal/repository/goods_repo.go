@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"strings"
+
 	"gorm.io/gorm"
 
 	"seckill/internal/model"
@@ -30,6 +32,98 @@ func (r *GoodsRepository) GetAll() ([]model.Goods, error) {
 		return nil, err
 	}
 	return goods, nil
+}
+
+type GoodsFilter struct {
+	Keyword string
+	Status  *uint8
+}
+
+// List 查询商品列表
+func (r *GoodsRepository) List(filter GoodsFilter) ([]model.Goods, error) {
+	goods, _, err := r.ListPage(filter, 1, 1000)
+	return goods, err
+}
+
+// ListPage 分页查询商品列表
+func (r *GoodsRepository) ListPage(filter GoodsFilter, page, pageSize int) ([]model.Goods, int64, error) {
+	var goods []model.Goods
+	query := r.db.Model(&model.Goods{})
+
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		query = query.Where("product_name LIKE ?", "%"+keyword+"%")
+	}
+	if filter.Status != nil {
+		query = query.Where("status = ?", *filter.Status)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	err := query.Order("id DESC").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
+		Find(&goods).Error
+	return goods, total, err
+}
+
+// ListOnSale 查询上架商品
+func (r *GoodsRepository) ListOnSale() ([]model.Goods, error) {
+	return r.List(GoodsFilter{Status: uint8Ptr(model.GoodsStatusOnSale)})
+}
+
+// Create 创建商品
+func (r *GoodsRepository) Create(goods *model.Goods) error {
+	return r.db.Create(goods).Error
+}
+
+// Update 更新商品
+func (r *GoodsRepository) Update(goods *model.Goods) error {
+	return r.db.Model(&model.Goods{}).Where("id = ?", goods.ID).Updates(map[string]interface{}{
+		"product_name": goods.ProductName,
+		"description":  goods.Description,
+		"stock":        goods.Stock,
+		"price":        goods.Price,
+		"status":       goods.Status,
+	}).Error
+}
+
+// Delete 删除商品
+func (r *GoodsRepository) Delete(id uint64) error {
+	return r.db.Delete(&model.Goods{}, id).Error
+}
+
+// HasOrders 判断商品是否已有关联订单
+func (r *GoodsRepository) HasOrders(id uint64) (bool, error) {
+	var count int64
+	if err := r.db.Table("orders").Where("goods_id = ?", id).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+type GoodsStats struct {
+	TotalGoods  int64 `json:"total_goods"`
+	OnSaleGoods int64 `json:"on_sale_goods"`
+	TotalStock  int64 `json:"total_stock"`
+}
+
+// GetStats 查询商品统计
+func (r *GoodsRepository) GetStats() (*GoodsStats, error) {
+	var stats GoodsStats
+	err := r.db.Raw(`
+		SELECT
+			COUNT(*) AS total_goods,
+			COALESCE(SUM(CASE WHEN status = ? THEN 1 ELSE 0 END), 0) AS on_sale_goods,
+			COALESCE(SUM(stock), 0) AS total_stock
+		FROM goods
+	`, model.GoodsStatusOnSale).Scan(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
 }
 
 // DecrStock 扣减库存 (乐观锁)
@@ -135,4 +229,8 @@ func (r *GoodsRepository) IncrStockBatch(id uint64, count int) error {
 	return r.db.Model(&model.Goods{}).
 		Where("id = ?", id).
 		Update("stock", gorm.Expr("stock + ?", count)).Error
+}
+
+func uint8Ptr(v uint8) *uint8 {
+	return &v
 }

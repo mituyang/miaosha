@@ -30,6 +30,16 @@ func warmUpStock(cfg *config.Config) {
 	logger.Info.Printf("Stock warmup completed: %d goods", count)
 }
 
+// warmUpAdminStats 启动时预热后台统计快照
+func warmUpAdminStats(cfg *config.Config) {
+	adminSvc := service.NewAdminService(service.NewSeckillService(cfg))
+	if err := adminSvc.WarmStatsCache(context.Background()); err != nil {
+		logger.Error.Printf("warmup admin stats failed: %v", err)
+		return
+	}
+	logger.Info.Println("Admin stats snapshot warmed")
+}
+
 func main() {
 	// 设置时区为东八区
 	loc, _ := time.LoadLocation("Asia/Shanghai")
@@ -53,6 +63,11 @@ func main() {
 		logger.Error.Fatalf("init mysql failed: %v", err)
 	}
 	logger.Info.Println("MySQL connected")
+
+	if err := database.EnsureSchema(); err != nil {
+		logger.Error.Fatalf("ensure schema failed: %v", err)
+	}
+	logger.Info.Println("MySQL schema ensured")
 
 	// 3. 初始化 Redis
 	if err := redis.Init(&cfg.Redis); err != nil {
@@ -95,7 +110,10 @@ func main() {
 	// 9. 启动时预热库存
 	warmUpStock(cfg)
 
-	// 10. 启动 HTTP 服务
+	// 10. 启动时预热后台统计快照
+	warmUpAdminStats(cfg)
+
+	// 11. 启动 HTTP 服务
 	r := router.Setup(cfg)
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
@@ -109,7 +127,7 @@ func main() {
 		}
 	}()
 
-	// 11. 优雅关闭
+	// 12. 优雅关闭
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

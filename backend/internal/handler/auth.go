@@ -59,6 +59,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		switch err {
 		case service.ErrUserNotFound, service.ErrPasswordWrong:
 			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid username or password"})
+		case service.ErrUserDisabled:
+			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "user disabled"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "login failed"})
 		}

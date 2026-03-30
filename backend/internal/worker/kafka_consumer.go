@@ -478,6 +478,7 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 		logger.Error.Printf("batch add order timeout failed: goodsID=%d, err=%v", goodsID, err)
 	}
 
+	_ = redis.IncrementAdminOrdersCreated(ctx, orders)
 	logger.Info.Printf("batch write success: goodsID=%d, count=%d", goodsID, len(orders))
 	return append(items, duplicateItems...)
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 
 	"golang.org/x/crypto/bcrypt"
@@ -9,12 +10,14 @@ import (
 	"seckill/internal/model"
 	"seckill/internal/repository"
 	"seckill/pkg/jwt"
+	"seckill/pkg/redis"
 )
 
 var (
 	ErrUserExists    = errors.New("username already exists")
 	ErrUserNotFound  = errors.New("user not found")
 	ErrPasswordWrong = errors.New("password incorrect")
+	ErrUserDisabled  = errors.New("user disabled")
 )
 
 type AuthService struct {
@@ -49,9 +52,16 @@ func (s *AuthService) Register(username, password string) error {
 	user := &model.User{
 		Username: username,
 		Password: string(hashedPassword),
+		Status:   model.UserStatusEnabled,
 	}
 
-	return s.userRepo.Create(user)
+	if err := s.userRepo.Create(user); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	_ = redis.IncrementAdminUserCreated(ctx, user.Status)
+	return redis.SetUserEnabled(ctx, user.ID, true)
 }
 
 // Login 用户登录
@@ -62,6 +72,10 @@ func (s *AuthService) Login(username, password string) (string, error) {
 			return "", ErrUserNotFound
 		}
 		return "", err
+	}
+
+	if user.Status == model.UserStatusDisabled {
+		return "", ErrUserDisabled
 	}
 
 	// 校验密码

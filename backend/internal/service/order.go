@@ -36,13 +36,15 @@ func (s *OrderService) PayOrder(ctx context.Context, orderID, userID uint64) err
 	if order.Status != 0 {
 		return ErrOrderStatusInvalid
 	}
-	if err := s.orderRepo.Pay(orderID, time.Now()); err != nil {
+	payTime := time.Now()
+	if err := s.orderRepo.Pay(orderID, payTime); err != nil {
 		return err
 	}
 	// 更新 Redis 状态为已支付
 	_ = redis.SetUserStatus(ctx, order.GoodsID, userID, 1)
 	// 从超时队列移除（支付成功，不需要超时取消）
 	_ = redis.RemoveOrderTimeout(ctx, orderID)
+	_ = redis.MarkAdminOrderPaid(ctx, order.GoodsID, order.Quantity, order.PayAmount, payTime)
 	return nil
 }
 
@@ -84,6 +86,7 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 
 	// 6. 清除已处理标记 (减少已处理数量)
 	_ = redis.ClearProcessed(ctx, order.GoodsID, userID, quantity)
+	_ = redis.MarkAdminOrderCancelled(ctx, order.GoodsID, quantity)
 
 	return nil
 }

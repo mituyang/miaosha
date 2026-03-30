@@ -8,6 +8,7 @@ import (
 
 	"seckill/internal/config"
 	"seckill/internal/dto"
+	"seckill/internal/model"
 	"seckill/internal/repository"
 	"seckill/pkg/database"
 	"seckill/pkg/logger"
@@ -21,6 +22,7 @@ const (
 	ResultSuccess     Result = 1
 	ResultSoldOut     Result = 0
 	ResultLimitExceed Result = -1
+	ResultNotOnSale   Result = -2
 	ResultError       Result = -99
 )
 
@@ -51,6 +53,14 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 	// 校验购买数量
 	if quantity <= 0 || quantity > maxBuyLimit {
 		return ResultError, fmt.Errorf("购买数量必须在 1-%d 之间", maxBuyLimit)
+	}
+
+	onSale, err := redis.IsGoodsOnSale(ctx, goodsID)
+	if err != nil {
+		return ResultError, err
+	}
+	if !onSale {
+		return ResultNotOnSale, nil
 	}
 
 	// 1. 检查用户资格并标记（扣库存）
@@ -135,6 +145,14 @@ func (s *SeckillService) WarmUp(ctx context.Context, goodsID uint64) error {
 		return fmt.Errorf("clear old data failed: %w", err)
 	}
 
+	if err := redis.SetGoodsOnSale(ctx, goodsID, goods.Status == model.GoodsStatusOnSale); err != nil {
+		return fmt.Errorf("set goods status failed: %w", err)
+	}
+
+	if goods.Status != model.GoodsStatusOnSale {
+		return nil
+	}
+
 	// 初始化库存到 Redis
 	if err := redis.InitStock(ctx, goodsID, int(goods.Stock)); err != nil {
 		return fmt.Errorf("init stock failed: %w", err)
@@ -163,6 +181,13 @@ func (s *SeckillService) WarmUpAll(ctx context.Context) (int, error) {
 	count := 0
 	for _, g := range goods {
 		if err := redis.ClearSeckillData(ctx, g.ID); err != nil {
+			continue
+		}
+		if err := redis.SetGoodsOnSale(ctx, g.ID, g.Status == model.GoodsStatusOnSale); err != nil {
+			continue
+		}
+		if g.Status != model.GoodsStatusOnSale {
+			count++
 			continue
 		}
 		if err := redis.InitStock(ctx, g.ID, int(g.Stock)); err != nil {

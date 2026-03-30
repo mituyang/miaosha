@@ -55,6 +55,8 @@ func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 		c.JSON(http.StatusOK, util.Error(util.CodeSoldOut, "商品已售罄"))
 	case service.ResultLimitExceed:
 		c.JSON(http.StatusOK, util.Error(util.CodeLimitExceed, "超过限购数量"))
+	case service.ResultNotOnSale:
+		c.JSON(http.StatusOK, util.Error(util.CodeGoodsOffSale, "商品已下架"))
 	default:
 		c.JSON(http.StatusOK, util.Error(util.CodeServerError, "系统繁忙，请稍后重试"))
 	}

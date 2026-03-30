@@ -39,6 +39,11 @@ func main() {
 	}
 	logger.Info.Println("MySQL connected")
 
+	if err := database.EnsureSchema(); err != nil {
+		logger.Error.Fatalf("ensure schema failed: %v", err)
+	}
+	logger.Info.Println("MySQL schema ensured")
+
 	// 3. 初始化 Redis
 	if err := redis.Init(&cfg.Redis); err != nil {
 		logger.Error.Fatalf("init redis failed: %v", err)

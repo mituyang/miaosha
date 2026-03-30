@@ -205,6 +205,9 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 	if err := redis.BatchRestoreStock(ctx, cancelledItems); err != nil {
 		logger.Error.Printf("batch restore stock failed: %v", err)
 	}
+	for _, item := range cancelledItems {
+		_ = redis.MarkAdminOrderCancelled(ctx, item.GoodsID, item.Quantity)
+	}
 
 	logger.Info.Printf("batch cancelled %d orders", len(cancelledIDs))
 	return nil
@@ -235,6 +238,7 @@ func (s *RedisTimeoutScanner) cancelOrder(ctx context.Context, item redis.OrderT
 	// 清除用户标记，允许重新抢购
 	_ = redis.ClearUserBought(ctx, item.GoodsID, item.UserID, quantity)
 	_ = redis.ClearProcessed(ctx, item.GoodsID, item.UserID, quantity)
+	_ = redis.MarkAdminOrderCancelled(ctx, item.GoodsID, quantity)
 
 	logger.Info.Printf("order cancelled by redis scanner: orderID=%d", item.OrderID)
 	return nil

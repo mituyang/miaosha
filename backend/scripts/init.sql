@@ -6,10 +6,15 @@ USE seckill;
 CREATE TABLE IF NOT EXISTS goods (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '商品ID',
     product_name VARCHAR(255) NOT NULL COMMENT '商品名称',
+    description VARCHAR(500) NOT NULL DEFAULT '' COMMENT '商品描述',
     stock INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '库存数量',
     price DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '秒杀价格',
+    status TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '商品状态: 0-下架, 1-上架',
     version INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '更新时间',
     PRIMARY KEY (id),
+    KEY idx_goods_status (status),
     CONSTRAINT chk_stock_non_negative CHECK (stock >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品表';
 
@@ -36,6 +41,8 @@ CREATE TABLE IF NOT EXISTS orders (
     INDEX idx_user_id (user_id),
     INDEX idx_user_goods_status (user_id, goods_id, status),
     INDEX idx_status_write_time (status, write_time), -- 超时订单扫描优化
+    INDEX idx_orders_create_time (create_time),
+    INDEX idx_orders_status_create_time (status, create_time),
     INDEX idx_goods_id (goods_id) -- 库存返还查询优化
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单表';
 
@@ -44,13 +51,17 @@ CREATE TABLE `users` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `username` varchar(50) NOT NULL COMMENT '用户名',
   `password` varchar(255) NOT NULL COMMENT '密码哈希',
+  `status` tinyint unsigned NOT NULL DEFAULT 1 COMMENT '用户状态: 0-禁用, 1-启用',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_username` (`username`)
+  UNIQUE KEY `uk_username` (`username`),
+  KEY `idx_users_status` (`status`),
+  KEY `idx_users_created_at` (`created_at`),
+  KEY `idx_users_status_created_at` (`status`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户表';
 
 
 -- 插入测试数据
-INSERT INTO goods (product_name, stock, price, version) VALUES 
-('iPhone 15 Pro', 10000, 6999.00, 0),
-('MacBook Pro M3', 50, 12999.00, 0);
+INSERT INTO goods (product_name, description, stock, price, status, version) VALUES 
+('iPhone 15 Pro', 'A17 Pro 芯片，适用于高并发秒杀演示', 10000, 6999.00, 1, 0),
+('MacBook Pro M3', '高性能笔记本，适用于高客单价商品演示', 50, 12999.00, 1, 0);

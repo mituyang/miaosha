@@ -133,6 +133,7 @@ func (s *MySQLTimeoutScanner) cancelOrder(ctx context.Context, orderID, userID, 
 	// 清除用户标记，允许重新抢购
 	_ = redis.ClearUserBought(ctx, goodsID, userID, quantity)
 	_ = redis.ClearProcessed(ctx, goodsID, userID, quantity)
+	_ = redis.MarkAdminOrderCancelled(ctx, goodsID, quantity)
 
 	logger.Info.Printf("order cancelled by MySQL fallback: orderID=%d", orderID)
 	return nil

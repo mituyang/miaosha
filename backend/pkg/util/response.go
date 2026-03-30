@@ -2,11 +2,12 @@ package util
 
 // 业务错误码
 const (
-	CodeSuccess     = 0
-	CodeParamError  = 400
-	CodeServerError = 500
-	CodeSoldOut     = 1001
-	CodeLimitExceed = 1002
+	CodeSuccess      = 0
+	CodeParamError   = 400
+	CodeServerError  = 500
+	CodeSoldOut      = 1001
+	CodeLimitExceed  = 1002
+	CodeGoodsOffSale = 1003
 )
 
 // Response 统一响应结构

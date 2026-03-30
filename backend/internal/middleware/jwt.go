@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"seckill/pkg/jwt"
+	redisPkg "seckill/pkg/redis"
 )
 
 // JWTAuth JWT 认证中间件
@@ -35,6 +36,18 @@ func JWTAuth(j *jwt.JWT) gin.HandlerFunc {
 		}
 
 		// 将用户信息存入上下文
+		enabled, err := redisPkg.IsUserEnabled(c.Request.Context(), claims.UserID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "user status check failed"})
+			c.Abort()
+			return
+		}
+		if !enabled {
+			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "user disabled"})
+			c.Abort()
+			return
+		}
+
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Next()
