@@ -271,6 +271,17 @@ func (h *AdminHandler) RebuildStats(c *gin.Context) {
 	c.JSON(http.StatusOK, util.Success(stats))
 }
 
+// GetObservability 查询中间件运行态
+func (h *AdminHandler) GetObservability(c *gin.Context) {
+	data, err := h.adminSvc.GetObservability(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "获取中间件观测数据失败"))
+		return
+	}
+
+	c.JSON(http.StatusOK, util.Success(data))
+}
+
 // Ping 校验管理员凭证
 func (h *AdminHandler) Ping(c *gin.Context) {
 	c.JSON(http.StatusOK, util.Success(gin.H{"ok": h.adminSvc.Ping()}))

@@ -85,6 +85,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 
 			admin.GET("/stats", adminHandler.GetStats)
 			admin.POST("/stats/rebuild", adminHandler.RebuildStats)
+			admin.GET("/observability", adminHandler.GetObservability)
 		}
 	}
 

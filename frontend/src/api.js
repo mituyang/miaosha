@@ -165,3 +165,10 @@ export const adminRebuildStats = (adminSecret) => {
     headers: adminHeaders(adminSecret)
   })
 }
+
+// 管理端查询中间件观测数据
+export const adminGetObservability = (adminSecret) => {
+  return api.get('/admin/observability', {
+    headers: adminHeaders(adminSecret)
+  })
+}

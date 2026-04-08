@@ -367,6 +367,290 @@
         </div>
       </section>
 
+      <section v-if="activeTab === 'observability'" class="admin-section">
+        <article class="panel ops-hero-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Kafka / Redis 运行态</h2>
+              <p class="warmup-desc">业务视角直接看分段库存、超时队列、分区 lag 和 consumer 归属；排查时可一键跳到外部工具。</p>
+            </div>
+            <div class="ops-tool-links">
+              <a
+                v-if="observability.toolLinks.akhq"
+                :href="observability.toolLinks.akhq"
+                target="_blank"
+                rel="noreferrer"
+                class="btn btn-secondary admin-link"
+              >
+                打开 AKHQ
+              </a>
+              <a
+                v-if="observability.toolLinks.redisInsight"
+                :href="observability.toolLinks.redisInsight"
+                target="_blank"
+                rel="noreferrer"
+                class="btn btn-secondary admin-link"
+              >
+                打开 Redis Insight
+              </a>
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <article class="stat-card accent-red">
+              <span class="stat-label">Redis Key 总数</span>
+              <strong class="stat-value">{{ formatCount(observability.redis.dbSize) }}</strong>
+              <p class="stat-meta">分段 {{ formatCount(observability.redis.keyspace.segmentKeys) }} / 已购 {{ formatCount(observability.redis.keyspace.boughtKeys) }}</p>
+            </article>
+            <article class="stat-card accent-amber">
+              <span class="stat-label">超时队列</span>
+              <strong class="stat-value">{{ formatCount(observability.redis.timeoutQueueSize) }}</strong>
+              <p class="stat-meta">到期待处理 {{ formatCount(observability.redis.pendingTimeoutCount) }}</p>
+            </article>
+            <article class="stat-card accent-cyan">
+              <span class="stat-label">Kafka 总 Lag</span>
+              <strong class="stat-value">{{ formatCount(observability.kafka.totalLag) }}</strong>
+              <p class="stat-meta">消费组 {{ groupStateText(observability.kafka.groupState) }}</p>
+            </article>
+            <article class="stat-card accent-slate">
+              <span class="stat-label">DLQ 深度</span>
+              <strong class="stat-value">{{ formatCount(observability.kafka.dlqDepth) }}</strong>
+              <p class="stat-meta">活跃消费者 {{ formatCount(observability.kafka.activeMemberCount) }}</p>
+            </article>
+          </div>
+        </article>
+
+        <div v-if="observability.redisError || observability.kafkaError" class="ops-error-grid">
+          <div v-if="observability.redisError" class="alert alert-error">Redis 观测获取失败：{{ observability.redisError }}</div>
+          <div v-if="observability.kafkaError" class="alert alert-error">Kafka 观测获取失败：{{ observability.kafkaError }}</div>
+        </div>
+
+        <div class="observability-grid">
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Redis 键空间</h2>
+              <span :class="['status-badge', observability.redis.adminStatsReady ? 'status-on' : 'status-pending']">
+                {{ observability.redis.adminStatsReady ? '统计快照可读' : '统计快照待重建' }}
+              </span>
+            </div>
+            <div class="keyspace-grid">
+              <div class="kv-card">
+                <span>总键数</span>
+                <strong>{{ formatCount(observability.redis.keyspace.totalKeys) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>库存分段</span>
+                <strong>{{ formatCount(observability.redis.keyspace.segmentKeys) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>已购记录</span>
+                <strong>{{ formatCount(observability.redis.keyspace.boughtKeys) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>已处理记录</span>
+                <strong>{{ formatCount(observability.redis.keyspace.processedKeys) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>商品状态</span>
+                <strong>{{ formatCount(observability.redis.keyspace.goodsStatusKeys) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>后台快照</span>
+                <strong>{{ formatCount(observability.redis.keyspace.adminStatsKeys) }}</strong>
+              </div>
+            </div>
+
+            <div class="panel-header slim">
+              <h3>预热锁</h3>
+              <span class="panel-note">当前 {{ formatCount(observability.redis.warmupLocks.length) }} 个</span>
+            </div>
+            <div v-if="observability.redis.warmupLocks.length === 0" class="table-empty">当前没有预热锁</div>
+            <div v-else class="mini-list">
+              <div v-for="lock in observability.redis.warmupLocks" :key="lock.key" class="mini-item">
+                <strong>{{ lock.target === 'all' ? '全量预热' : `商品 ${lock.target}` }}</strong>
+                <span>{{ lock.key }}</span>
+                <span>剩余 {{ formatCount(lock.ttlSec) }} 秒</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h2>Kafka 消费组</h2>
+              <span :class="['status-badge', observability.kafka.totalLag > 0 ? 'status-pending' : 'status-on']">
+                {{ groupStateText(observability.kafka.groupState) }}
+              </span>
+            </div>
+            <div class="keyspace-grid">
+              <div class="kv-card wide">
+                <span>Topic</span>
+                <strong>{{ observability.kafka.topic || '-' }}</strong>
+              </div>
+              <div class="kv-card wide">
+                <span>Consumer Group</span>
+                <strong>{{ observability.kafka.group || '-' }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>分区数</span>
+                <strong>{{ formatCount(observability.kafka.partitionCount) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>最新 Offset 汇总</span>
+                <strong>{{ formatCount(observability.kafka.totalLatestOffset) }}</strong>
+              </div>
+              <div class="kv-card">
+                <span>已提交 Offset 汇总</span>
+                <strong>{{ formatCount(observability.kafka.totalCommittedOffset) }}</strong>
+              </div>
+              <div class="kv-card wide">
+                <span>Brokers</span>
+                <strong>{{ observability.kafka.brokers.join(', ') || '-' }}</strong>
+              </div>
+            </div>
+
+            <div class="panel-header slim">
+              <h3>消费者成员</h3>
+              <span class="panel-note">按分区归属展示</span>
+            </div>
+            <div v-if="observability.kafka.members.length === 0" class="member-frame member-frame-empty">
+              <div class="table-empty">当前没有活跃消费者成员</div>
+            </div>
+            <div v-else class="mini-list member-frame member-list-scroll">
+              <div v-for="member in observability.kafka.members" :key="member.memberId" class="mini-item">
+                <strong>{{ member.clientId || member.memberId }}</strong>
+                <span>{{ member.clientHost || '未知来源' }}</span>
+                <span>分区 {{ member.partitions.length ? member.partitions.join(', ') : '-' }}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Redis 商品运行态</h2>
+            <span class="panel-note">看分段库存、已购与已处理数量是否对齐。</span>
+          </div>
+          <div class="table-shell">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>商品</th>
+                  <th>状态</th>
+                  <th>总库存</th>
+                  <th>已购</th>
+                  <th>已处理</th>
+                  <th>待落库</th>
+                  <th>分段库存</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="item in observability.redis.goods" :key="item.goodsId">
+                  <td>
+                    <div class="table-title">{{ item.goodsName }}</div>
+                    <div class="table-subtitle">ID {{ item.goodsId }}</div>
+                  </td>
+                  <td>
+                    <span :class="['status-badge', item.onSale ? 'status-on' : 'status-off']">
+                      {{ item.onSale ? '上架' : '下架' }}
+                    </span>
+                  </td>
+                  <td>{{ formatCount(item.totalStock) }}</td>
+                  <td>{{ formatCount(item.boughtQuantity) }} / {{ formatCount(item.boughtUsers) }} 人</td>
+                  <td>{{ formatCount(item.processedQuantity) }} / {{ formatCount(item.processedUsers) }} 人</td>
+                  <td>
+                    <span :class="['status-badge', item.pendingQuantity > 0 ? 'status-pending' : 'status-on']">
+                      {{ formatCount(item.pendingQuantity) }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="segment-stack">
+                      <span
+                        v-for="segment in visibleSegmentStocks(item.segmentStocks)"
+                        :key="`${item.goodsId}-${segment.segmentId}`"
+                        class="segment-pill"
+                      >
+                        S{{ segment.segmentId }}: {{ formatCount(segment.stock) }}
+                      </span>
+                      <span v-if="remainingSegmentCount(item.segmentStocks) > 0" class="segment-pill muted">
+                        +{{ remainingSegmentCount(item.segmentStocks) }} 段
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="observability.redis.goods.length === 0">
+                  <td colspan="7" class="table-empty">暂无 Redis 商品运行态</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Kafka 分区运行态</h2>
+            <span class="panel-note">按 partition 看 leader、offset、lag 和消费者归属。</span>
+          </div>
+          <div class="toolbar partition-toolbar">
+            <input
+              v-model.trim="kafkaPartitionFilters.keyword"
+              class="form-input toolbar-input"
+              placeholder="筛选 Partition / Consumer / Host / Leader"
+            />
+            <select v-model="kafkaPartitionFilters.lag" class="form-input toolbar-select">
+              <option value="all">全部 Lag</option>
+              <option value="lagged">有积压</option>
+              <option value="clean">无积压</option>
+              <option value="high">高积压</option>
+            </select>
+            <select v-model="kafkaPartitionFilters.assignment" class="form-input toolbar-select">
+              <option value="all">全部归属</option>
+              <option value="assigned">已分配</option>
+              <option value="unassigned">未分配</option>
+            </select>
+            <button class="btn btn-secondary" @click="resetKafkaPartitionFilters">重置</button>
+            <span class="panel-note partition-count">显示 {{ formatCount(filteredKafkaPartitions.length) }} / {{ formatCount(observability.kafka.partitions.length) }}</span>
+          </div>
+          <div class="table-shell partition-table-frame">
+            <table class="admin-table partition-table">
+              <thead>
+                <tr>
+                  <th>Partition</th>
+                  <th>Leader</th>
+                  <th>Earliest</th>
+                  <th>Latest</th>
+                  <th>Committed</th>
+                  <th>Lag</th>
+                  <th>消费者</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="partition in filteredKafkaPartitions" :key="partition.partition">
+                  <td>{{ partition.partition }}</td>
+                  <td>{{ partition.leader }}</td>
+                  <td>{{ formatCount(partition.earliestOffset) }}</td>
+                  <td>{{ formatCount(partition.latestOffset) }}</td>
+                  <td>{{ partition.committedOffset >= 0 ? formatCount(partition.committedOffset) : '-' }}</td>
+                  <td>
+                    <span :class="['status-badge', lagStatusClass(partition.lag)]">
+                      {{ formatCount(partition.lag) }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="table-title">{{ partition.clientId || partition.memberId || '-' }}</div>
+                    <div class="table-subtitle">{{ partition.clientHost || '未分配' }}</div>
+                  </td>
+                </tr>
+                <tr v-if="filteredKafkaPartitions.length === 0">
+                  <td colspan="7" class="table-empty">
+                    {{ observability.kafka.partitions.length === 0 ? '暂无 Kafka 分区运行态' : '没有匹配的分区' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
       <section v-if="activeTab === 'warmup'" class="admin-section">
         <div class="warmup-grid">
           <article class="panel warmup-card">
@@ -405,6 +689,7 @@ import {
   adminCreateGoods,
   adminDeleteGoods,
   adminGetGoods,
+  adminGetObservability,
   adminGetOrderDetail,
   adminGetOrders,
   adminRebuildStats,
@@ -426,6 +711,7 @@ const tabs = [
   { key: 'orders', label: '订单管理' },
   { key: 'users', label: '用户管理' },
   { key: 'stats', label: '数据统计' },
+  { key: 'observability', label: '中间件观测' },
   { key: 'warmup', label: '库存预热' }
 ]
 
@@ -438,6 +724,7 @@ const activeTab = ref('goods')
 
 const loadingState = reactive({
   stats: false,
+  observability: false,
   goods: false,
   orders: false,
   users: false
@@ -445,6 +732,7 @@ const loadingState = reactive({
 
 const loadedTabs = reactive({
   stats: false,
+  observability: false,
   goods: false,
   orders: false,
   users: false
@@ -489,6 +777,67 @@ const stats = reactive({
   salesRanking: []
 })
 
+const observability = reactive({
+  redisError: '',
+  kafkaError: '',
+  toolLinks: {
+    akhq: '',
+    redisInsight: ''
+  },
+  redis: {
+    dbSize: 0,
+    adminStatsReady: false,
+    timeoutQueueSize: 0,
+    pendingTimeoutCount: 0,
+    keyspace: {
+      totalKeys: 0,
+      segmentKeys: 0,
+      boughtKeys: 0,
+      processedKeys: 0,
+      goodsStatusKeys: 0,
+      userStatusKeys: 0,
+      adminStatsKeys: 0
+    },
+    warmupLocks: [],
+    goods: []
+  },
+  kafka: {
+    brokers: [],
+    topic: '',
+    group: '',
+    groupState: 'unknown',
+    partitionCount: 0,
+    activeMemberCount: 0,
+    totalLatestOffset: 0,
+    totalCommittedOffset: 0,
+    totalLag: 0,
+    dlqTopic: '',
+    dlqDepth: 0,
+    members: [],
+    partitions: []
+  }
+})
+
+const resolveToolUrl = (fallback, port) => {
+  try {
+    const current = new URL(window.location.href)
+    if (!fallback) {
+      return `${current.protocol}//${current.hostname}:${port}`
+    }
+
+    const target = new URL(fallback)
+    const isLocalFallback = ['localhost', '127.0.0.1'].includes(target.hostname)
+    const isRemoteCurrent = !['localhost', '127.0.0.1'].includes(current.hostname)
+    if (isLocalFallback && isRemoteCurrent) {
+      target.protocol = current.protocol
+      target.hostname = current.hostname
+    }
+    return target.toString().replace(/\/$/, '')
+  } catch {
+    return fallback || `http://localhost:${port}`
+  }
+}
+
 const goodsFilters = reactive({
   keyword: '',
   status: ''
@@ -502,6 +851,12 @@ const orderFilters = reactive({
 const userFilters = reactive({
   keyword: '',
   status: ''
+})
+
+const kafkaPartitionFilters = reactive({
+  keyword: '',
+  lag: 'all',
+  assignment: 'all'
 })
 
 const goodsForm = reactive({
@@ -582,7 +937,85 @@ const applyStats = payload => {
   }))
 }
 
+const applyObservability = payload => {
+  const next = payload || {}
+  observability.redisError = next.redis_error || ''
+  observability.kafkaError = next.kafka_error || ''
+  observability.toolLinks.akhq = resolveToolUrl(next.tool_links?.akhq || '', 8086)
+  observability.toolLinks.redisInsight = resolveToolUrl(next.tool_links?.redis_insight || '', 5540)
+
+  Object.assign(observability.redis.keyspace, {
+    totalKeys: Number(next.redis?.keyspace?.total_keys || 0),
+    segmentKeys: Number(next.redis?.keyspace?.segment_keys || 0),
+    boughtKeys: Number(next.redis?.keyspace?.bought_keys || 0),
+    processedKeys: Number(next.redis?.keyspace?.processed_keys || 0),
+    goodsStatusKeys: Number(next.redis?.keyspace?.goods_status_keys || 0),
+    userStatusKeys: Number(next.redis?.keyspace?.user_status_keys || 0),
+    adminStatsKeys: Number(next.redis?.keyspace?.admin_stats_keys || 0)
+  })
+
+  Object.assign(observability.redis, {
+    dbSize: Number(next.redis?.db_size || 0),
+    adminStatsReady: Boolean(next.redis?.admin_stats_ready),
+    timeoutQueueSize: Number(next.redis?.timeout_queue_size || 0),
+    pendingTimeoutCount: Number(next.redis?.pending_timeout_count || 0),
+    warmupLocks: (next.redis?.warmup_locks || []).map(item => ({
+      key: item.key,
+      target: item.target,
+      ttlSec: Number(item.ttl_sec || 0)
+    })),
+    goods: (next.redis?.goods || []).map(item => ({
+      goodsId: Number(item.goods_id || 0),
+      goodsName: item.goods_name,
+      onSale: Boolean(item.on_sale),
+      totalStock: Number(item.total_stock || 0),
+      boughtUsers: Number(item.bought_users || 0),
+      boughtQuantity: Number(item.bought_quantity || 0),
+      processedUsers: Number(item.processed_users || 0),
+      processedQuantity: Number(item.processed_quantity || 0),
+      pendingQuantity: Number(item.pending_quantity || 0),
+      segmentStocks: (item.segment_stocks || []).map(segment => ({
+        segmentId: Number(segment.segment_id || 0),
+        stock: Number(segment.stock || 0)
+      }))
+    }))
+  })
+
+  Object.assign(observability.kafka, {
+    brokers: next.kafka?.brokers || [],
+    topic: next.kafka?.topic || '',
+    group: next.kafka?.group || '',
+    groupState: next.kafka?.group_state || 'unknown',
+    partitionCount: Number(next.kafka?.partition_count || 0),
+    activeMemberCount: Number(next.kafka?.active_member_count || 0),
+    totalLatestOffset: Number(next.kafka?.total_latest_offset || 0),
+    totalCommittedOffset: Number(next.kafka?.total_committed_offset || 0),
+    totalLag: Number(next.kafka?.total_lag || 0),
+    dlqTopic: next.kafka?.dlq_topic || '',
+    dlqDepth: Number(next.kafka?.dlq_depth || 0),
+    members: (next.kafka?.members || []).map(member => ({
+      memberId: member.member_id,
+      clientId: member.client_id,
+      clientHost: member.client_host,
+      partitions: member.partitions || []
+    })),
+    partitions: (next.kafka?.partitions || []).map(partition => ({
+      partition: Number(partition.partition || 0),
+      leader: partition.leader || '-',
+      earliestOffset: Number(partition.earliest_offset || 0),
+      latestOffset: Number(partition.latest_offset || 0),
+      committedOffset: Number(partition.committed_offset ?? -1),
+      lag: Number(partition.lag || 0),
+      memberId: partition.member_id || '',
+      clientId: partition.client_id || '',
+      clientHost: partition.client_host || ''
+    }))
+  })
+}
+
 const formatCurrency = value => `¥${Number(value || 0).toFixed(2)}`
+
+const formatCount = value => Number(value || 0).toLocaleString('zh-CN')
 
 const formatTime = value => {
   if (!value) return '-'
@@ -600,6 +1033,61 @@ const goodsStatusText = status => (status === 1 ? '上架' : '下架')
 const orderStatusText = status => ({ 0: '待支付', 1: '已支付', 2: '已取消' }[status] || '未知')
 const orderStatusClass = status => ({ 0: 'status-pending', 1: 'status-on', 2: 'status-off' }[status] || 'status-off')
 const userStatusText = status => (status === 1 ? '启用' : '禁用')
+const groupStateText = state => ({
+  Stable: '稳定',
+  PreparingRebalance: '重平衡中',
+  CompletingRebalance: '完成重平衡',
+  Empty: '空闲',
+  Dead: '已停用',
+  unknown: '未知'
+}[state] || state || '未知')
+
+const lagStatusClass = lag => {
+  if (lag > 1000) return 'status-off'
+  if (lag > 0) return 'status-pending'
+  return 'status-on'
+}
+
+const visibleSegmentStocks = segmentStocks => {
+  const nonZero = (segmentStocks || []).filter(item => item.stock > 0)
+  const source = nonZero.length > 0 ? nonZero : (segmentStocks || [])
+  return source.slice(0, 8)
+}
+
+const remainingSegmentCount = segmentStocks => {
+  const nonZero = (segmentStocks || []).filter(item => item.stock > 0)
+  const source = nonZero.length > 0 ? nonZero : (segmentStocks || [])
+  return Math.max(source.length - 8, 0)
+}
+
+const filteredKafkaPartitions = computed(() => {
+  const keyword = kafkaPartitionFilters.keyword.trim().toLowerCase()
+
+  return (observability.kafka.partitions || []).filter(partition => {
+    if (kafkaPartitionFilters.lag === 'lagged' && partition.lag <= 0) return false
+    if (kafkaPartitionFilters.lag === 'clean' && partition.lag !== 0) return false
+    if (kafkaPartitionFilters.lag === 'high' && partition.lag <= 1000) return false
+
+    const assigned = Boolean(partition.memberId || partition.clientId || partition.clientHost)
+    if (kafkaPartitionFilters.assignment === 'assigned' && !assigned) return false
+    if (kafkaPartitionFilters.assignment === 'unassigned' && assigned) return false
+
+    if (!keyword) return true
+
+    const haystack = [
+      String(partition.partition),
+      partition.leader,
+      partition.memberId,
+      partition.clientId,
+      partition.clientHost
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+
+    return haystack.includes(keyword)
+  })
+})
 
 const totalPages = tab => {
   const current = pagination[tab]
@@ -643,6 +1131,23 @@ const fetchStats = async () => {
     handleAdminError(error, '获取统计数据失败')
   } finally {
     loadingState.stats = false
+  }
+}
+
+const fetchObservability = async () => {
+  loadingState.observability = true
+  try {
+    const res = await adminGetObservability(adminSecret.value)
+    if (res.data.code === 0) {
+      applyObservability(res.data.data)
+      loadedTabs.observability = true
+    } else {
+      showToast(res.data.msg || '获取中间件观测数据失败', 'error')
+    }
+  } catch (error) {
+    handleAdminError(error, '获取中间件观测数据失败')
+  } finally {
+    loadingState.observability = false
   }
 }
 
@@ -756,6 +1261,9 @@ const ensureTabLoaded = async (tab, force = false) => {
       break
     case 'stats':
       await fetchStats()
+      break
+    case 'observability':
+      await fetchObservability()
       break
     default:
       break
@@ -934,6 +1442,12 @@ const handleUserSearch = async () => {
   await fetchUsers(1)
 }
 
+const resetKafkaPartitionFilters = () => {
+  kafkaPartitionFilters.keyword = ''
+  kafkaPartitionFilters.lag = 'all'
+  kafkaPartitionFilters.assignment = 'all'
+}
+
 const resetGoodsFilters = async () => {
   goodsFilters.keyword = ''
   goodsFilters.status = ''
@@ -987,6 +1501,7 @@ const logoutAdmin = (notify = true) => {
   secretInput.value = ''
   authError.value = ''
   loadedTabs.stats = false
+  loadedTabs.observability = false
   loadedTabs.goods = false
   loadedTabs.orders = false
   loadedTabs.users = false
@@ -1060,7 +1575,7 @@ onMounted(async () => {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1110,7 +1625,7 @@ onMounted(async () => {
 
 .admin-subtitle {
   margin-top: 8px;
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .admin-header-actions {
@@ -1136,7 +1651,7 @@ onMounted(async () => {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.74);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1192,7 +1707,7 @@ onMounted(async () => {
 
 .panel-note {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .panel-side {
@@ -1203,21 +1718,54 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.ops-tool-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ops-error-grid {
+  display: grid;
+  gap: 12px;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
 }
 
+.observability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
 .stat-card {
   padding: 24px;
+}
+
+.stat-card.accent-red {
+  background: linear-gradient(180deg, rgba(255, 244, 240, 0.96) 0%, rgba(255, 255, 255, 0.92) 100%);
+}
+
+.stat-card.accent-amber {
+  background: linear-gradient(180deg, rgba(255, 249, 237, 0.96) 0%, rgba(255, 255, 255, 0.92) 100%);
+}
+
+.stat-card.accent-cyan {
+  background: linear-gradient(180deg, rgba(238, 250, 251, 0.96) 0%, rgba(255, 255, 255, 0.92) 100%);
+}
+
+.stat-card.accent-slate {
+  background: linear-gradient(180deg, rgba(240, 244, 247, 0.96) 0%, rgba(255, 255, 255, 0.92) 100%);
 }
 
 .stat-label {
   display: block;
   margin-bottom: 12px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -1231,7 +1779,92 @@ onMounted(async () => {
 .stat-meta {
   margin-top: 10px;
   color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.keyspace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kv-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: rgba(250, 250, 248, 0.92);
+  border: 1px solid rgba(23, 23, 23, 0.06);
+  border-radius: 14px;
+}
+
+.kv-card.wide {
+  grid-column: span 2;
+}
+
+.kv-card span {
+  color: var(--text-muted);
   font-size: 13px;
+  font-weight: 600;
+}
+
+.kv-card strong {
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.mini-list {
+  display: grid;
+  gap: 12px;
+}
+
+.member-frame {
+  min-height: 360px;
+  max-height: 360px;
+}
+
+.member-frame-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.member-list-scroll {
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.member-list-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.member-list-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(23, 23, 23, 0.14);
+}
+
+.mini-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: rgba(248, 248, 246, 0.92);
+  border: 1px solid rgba(23, 23, 23, 0.06);
+  border-radius: 14px;
+}
+
+.mini-item strong {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.mini-item span {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
 }
 
 .toolbar {
@@ -1243,6 +1876,15 @@ onMounted(async () => {
 
 .toolbar.compact {
   margin-bottom: 0;
+}
+
+.partition-toolbar {
+  align-items: center;
+}
+
+.partition-count {
+  margin-left: auto;
+  white-space: nowrap;
 }
 
 .toolbar-input {
@@ -1283,9 +1925,35 @@ onMounted(async () => {
   overflow-x: auto;
 }
 
+.partition-table-frame {
+  min-height: 520px;
+  max-height: 520px;
+  overflow-y: auto;
+  border: 1px solid rgba(23, 23, 23, 0.06);
+  border-radius: 18px;
+}
+
+.partition-table-frame::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.partition-table-frame::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(23, 23, 23, 0.14);
+}
+
 .admin-table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.partition-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(252, 252, 250, 0.98);
+  backdrop-filter: blur(8px);
 }
 
 .admin-table th,
@@ -1294,12 +1962,12 @@ onMounted(async () => {
   border-bottom: 1px solid rgba(23, 23, 23, 0.07);
   text-align: left;
   vertical-align: top;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 .admin-table th {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1312,8 +1980,31 @@ onMounted(async () => {
 .table-subtitle {
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
+}
+
+.segment-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.segment-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(23, 23, 23, 0.06);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.segment-pill.muted {
+  background: rgba(23, 23, 23, 0.04);
+  color: var(--text-secondary);
 }
 
 .table-empty {
@@ -1328,7 +2019,7 @@ onMounted(async () => {
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -1391,13 +2082,13 @@ onMounted(async () => {
 
 .detail-grid span {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .detail-grid strong {
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.5;
   word-break: break-all;
 }
@@ -1409,7 +2100,7 @@ onMounted(async () => {
   gap: 12px;
   margin-top: 18px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .pager-actions {
@@ -1431,7 +2122,7 @@ onMounted(async () => {
 
 .warmup-desc {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.7;
 }
 
@@ -1453,6 +2144,15 @@ onMounted(async () => {
   .goods-form-grid,
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .observability-grid,
+  .keyspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .kv-card.wide {
+    grid-column: span 1;
   }
 }
 
@@ -1476,6 +2176,10 @@ onMounted(async () => {
   .pager {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .partition-count {
+    margin-left: 0;
   }
 
   .toolbar-select,
