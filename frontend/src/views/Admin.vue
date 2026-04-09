@@ -34,7 +34,6 @@
         <div>
           <p class="admin-eyebrow">Operations</p>
           <h1 class="admin-title">秒杀后台管理</h1>
-          <p class="admin-subtitle">后台与秒杀前台已分离。当前只会加载你正在查看的模块，统计数据走 Redis 快照，刷新不会再反复全表聚合。</p>
         </div>
         <div class="admin-header-actions">
           <button class="btn btn-secondary" @click="refreshCurrentTab" :disabled="tabLoading">
@@ -711,7 +710,7 @@ const tabs = [
   { key: 'orders', label: '订单管理' },
   { key: 'users', label: '用户管理' },
   { key: 'stats', label: '数据统计' },
-  { key: 'observability', label: '中间件观测' },
+  { key: 'observability', label: '中间件运行监控' },
   { key: 'warmup', label: '库存预热' }
 ]
 
@@ -1142,10 +1141,10 @@ const fetchObservability = async () => {
       applyObservability(res.data.data)
       loadedTabs.observability = true
     } else {
-      showToast(res.data.msg || '获取中间件观测数据失败', 'error')
+      showToast(res.data.msg || '获取中间件运行监控数据失败', 'error')
     }
   } catch (error) {
-    handleAdminError(error, '获取中间件观测数据失败')
+    handleAdminError(error, '获取中间件运行监控数据失败')
   } finally {
     loadingState.observability = false
   }

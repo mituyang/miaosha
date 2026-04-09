@@ -33,9 +33,19 @@ export const register = (username, password) => {
   return api.post('/auth/register', { username, password })
 }
 
+// 获取登录验证码
+export const getLoginCaptcha = () => {
+  return api.get('/auth/captcha')
+}
+
 // 用户登录
-export const login = (username, password) => {
-  return api.post('/auth/login', { username, password })
+export const login = (username, password, captchaId, captchaCode) => {
+  return api.post('/auth/login', {
+    username,
+    password,
+    captcha_id: captchaId,
+    captcha_code: captchaCode
+  })
 }
 
 // 获取商品列表
@@ -166,7 +176,7 @@ export const adminRebuildStats = (adminSecret) => {
   })
 }
 
-// 管理端查询中间件观测数据
+// 管理端查询中间件运行监控数据
 export const adminGetObservability = (adminSecret) => {
   return api.get('/admin/observability', {
     headers: adminHeaders(adminSecret)

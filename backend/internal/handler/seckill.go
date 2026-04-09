@@ -44,7 +44,7 @@ func (h *SeckillHandler) DoSeckill(c *gin.Context) {
 
 	result, err := h.svc.DoSeckill(c.Request.Context(), userID, req.GoodsID, req.Quantity, requestTime)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "秒杀请求处理失败"))
 		return
 	}
 
@@ -73,7 +73,7 @@ func (h *SeckillHandler) GetStock(c *gin.Context) {
 
 	stock, err := h.svc.GetStock(c.Request.Context(), goodsID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "查询库存失败"))
 		return
 	}
 
@@ -90,7 +90,7 @@ func (h *SeckillHandler) WarmUp(c *gin.Context) {
 	}
 
 	if err := h.svc.WarmUp(c.Request.Context(), goodsID); err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "库存预热失败"))
 		return
 	}
 
@@ -102,7 +102,7 @@ func (h *SeckillHandler) WarmUp(c *gin.Context) {
 func (h *SeckillHandler) WarmUpAll(c *gin.Context) {
 	count, err := h.svc.WarmUpAll(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "库存预热失败"))
 		return
 	}
 

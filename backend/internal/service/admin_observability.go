@@ -33,13 +33,13 @@ func (s *AdminService) GetObservability(ctx context.Context) (*dto.AdminObservab
 	}
 
 	if redisObs, err := s.collectRedisObservability(ctx); err != nil {
-		resp.RedisError = err.Error()
+		resp.RedisError = "获取 Redis 运行状态失败"
 	} else {
 		resp.Redis = redisObs
 	}
 
 	if kafkaObs, err := s.collectKafkaObservability(ctx); err != nil {
-		resp.KafkaError = err.Error()
+		resp.KafkaError = "获取 Kafka 运行状态失败"
 	} else {
 		resp.Kafka = kafkaObs
 	}

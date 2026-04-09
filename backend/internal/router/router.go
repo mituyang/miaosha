@@ -37,6 +37,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 		// 认证接口 (公开)
 		auth := api.Group("/auth")
 		{
+			auth.GET("/captcha", authHandler.GetCaptcha)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 		}

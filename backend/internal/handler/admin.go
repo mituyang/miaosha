@@ -231,7 +231,7 @@ func (h *AdminHandler) WarmUpGoods(c *gin.Context) {
 	}
 
 	if err := h.adminSvc.WarmUpGoods(c.Request.Context(), goodsID); err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "库存预热失败"))
 		return
 	}
 
@@ -242,7 +242,7 @@ func (h *AdminHandler) WarmUpGoods(c *gin.Context) {
 func (h *AdminHandler) WarmUpAll(c *gin.Context) {
 	count, err := h.adminSvc.WarmUpAll(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, err.Error()))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "库存预热失败"))
 		return
 	}
 
@@ -275,7 +275,7 @@ func (h *AdminHandler) RebuildStats(c *gin.Context) {
 func (h *AdminHandler) GetObservability(c *gin.Context) {
 	data, err := h.adminSvc.GetObservability(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "获取中间件观测数据失败"))
+		c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "获取中间件运行监控数据失败"))
 		return
 	}
 

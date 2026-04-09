@@ -8,8 +8,8 @@ import (
 )
 
 var (
-	ErrTokenExpired = errors.New("token expired")
-	ErrTokenInvalid = errors.New("token invalid")
+	ErrTokenExpired = errors.New("登录凭证已过期")
+	ErrTokenInvalid = errors.New("登录凭证无效")
 )
 
 type Claims struct {

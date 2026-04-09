@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"seckill/internal/service"
+	"seckill/pkg/util"
 )
 
 type AuthHandler struct {
@@ -22,35 +23,60 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username    string `json:"username" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	CaptchaID   string `json:"captcha_id" binding:"required"`
+	CaptchaCode string `json:"captcha_code" binding:"required,len=4"`
 }
 
 // Register 用户注册
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		c.JSON(http.StatusBadRequest, util.Error(400, "请求参数无效"))
 		return
 	}
 
 	if err := h.authSvc.Register(req.Username, req.Password); err != nil {
 		if err == service.ErrUserExists {
-			c.JSON(http.StatusConflict, gin.H{"code": 409, "msg": "username already exists"})
+			c.JSON(http.StatusConflict, util.Error(409, "用户名已存在"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "register failed"})
+		c.JSON(http.StatusInternalServerError, util.Error(500, "注册失败"))
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+	c.JSON(http.StatusOK, util.Success(nil))
+}
+
+// GetCaptcha 获取登录验证码
+func (h *AuthHandler) GetCaptcha(c *gin.Context) {
+	captcha, err := h.authSvc.GenerateCaptcha(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, util.Error(500, "获取验证码失败"))
+		return
+	}
+
+	c.JSON(http.StatusOK, util.Success(captcha))
 }
 
 // Login 用户登录
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "msg": err.Error()})
+		c.JSON(http.StatusBadRequest, util.Error(400, "请求参数无效"))
+		return
+	}
+
+	if err := h.authSvc.VerifyCaptcha(c.Request.Context(), req.CaptchaID, req.CaptchaCode); err != nil {
+		switch err {
+		case service.ErrCaptchaInvalid:
+			c.JSON(http.StatusBadRequest, util.Error(400, "验证码错误"))
+		case service.ErrCaptchaExpired:
+			c.JSON(http.StatusBadRequest, util.Error(400, "验证码已过期，请刷新后重试"))
+		default:
+			c.JSON(http.StatusInternalServerError, util.Error(500, "验证码校验失败"))
+		}
 		return
 	}
 
@@ -58,14 +84,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case service.ErrUserNotFound, service.ErrPasswordWrong:
-			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "invalid username or password"})
+			c.JSON(http.StatusUnauthorized, util.Error(401, "用户名或密码错误"))
 		case service.ErrUserDisabled:
-			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "user disabled"})
+			c.JSON(http.StatusForbidden, util.Error(403, "用户已被禁用"))
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "msg": "login failed"})
+			c.JSON(http.StatusInternalServerError, util.Error(500, "登录失败"))
 		}
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "data": gin.H{"token": token}})
+	c.JSON(http.StatusOK, util.Success(gin.H{"token": token}))
 }

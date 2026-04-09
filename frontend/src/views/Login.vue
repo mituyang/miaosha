@@ -34,6 +34,24 @@
           />
         </div>
 
+        <div class="form-group">
+          <label class="form-label" for="login-captcha">验证码</label>
+          <div class="captcha-row">
+            <input
+              id="login-captcha"
+              v-model="form.captchaCode"
+              type="text"
+              class="form-input"
+              placeholder="请输入验证码"
+              maxlength="4"
+            />
+            <button type="button" class="captcha-button" @click="fetchCaptcha" :disabled="captchaLoading">
+              <img v-if="captchaImage" :src="captchaImage" alt="验证码" class="captcha-image" />
+              <span v-else>{{ captchaLoading ? '加载中...' : '刷新验证码' }}</span>
+            </button>
+          </div>
+        </div>
+
         <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
           {{ loading ? '登录中...' : '登录' }}
         </button>
@@ -47,37 +65,99 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { login } from '../api'
+import { getLoginCaptcha, login } from '../api'
 
 const router = useRouter()
 const loading = ref(false)
 const error = ref('')
-const form = reactive({ username: '', password: '' })
+const captchaLoading = ref(false)
+const captchaId = ref('')
+const captchaImage = ref('')
+const form = reactive({ username: '', password: '', captchaCode: '' })
+
+const fetchCaptcha = async () => {
+  captchaLoading.value = true
+  try {
+    const res = await getLoginCaptcha()
+    if (res.data.code === 0) {
+      captchaId.value = res.data.data.captcha_id
+      captchaImage.value = res.data.data.captcha_image
+      form.captchaCode = ''
+    } else {
+      error.value = res.data.msg || '获取验证码失败'
+    }
+  } catch (e) {
+    error.value = e.response?.data?.msg || '获取验证码失败'
+  } finally {
+    captchaLoading.value = false
+  }
+}
 
 const handleSubmit = async () => {
   error.value = ''
   
-  if (!form.username || !form.password) {
-    error.value = '请填写用户名和密码'
+  if (!form.username || !form.password || !form.captchaCode) {
+    error.value = '请填写用户名、密码和验证码'
+    return
+  }
+
+  if (!captchaId.value) {
+    error.value = '验证码未加载，请刷新后重试'
     return
   }
   
   loading.value = true
   try {
-    const res = await login(form.username, form.password)
+    const res = await login(form.username, form.password, captchaId.value, form.captchaCode)
     if (res.data.code === 0) {
       localStorage.setItem('token', res.data.data.token)
       localStorage.setItem('username', form.username)
       router.push('/seckill')
     } else {
       error.value = res.data.msg
+      await fetchCaptcha()
     }
   } catch (e) {
     error.value = e.response?.data?.msg || '登录失败'
+    await fetchCaptcha()
   } finally {
     loading.value = false
   }
 }
+
+onMounted(() => {
+  fetchCaptcha()
+})
 </script>
+
+<style scoped>
+.captcha-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 12px;
+  align-items: center;
+}
+
+.captcha-button {
+  width: 132px;
+  height: 44px;
+  border: 1px solid rgba(92, 68, 42, 0.18);
+  border-radius: 12px;
+  background: #f8f2ea;
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.captcha-button:disabled {
+  cursor: wait;
+}
+
+.captcha-image {
+  display: block;
+  width: 132px;
+  height: 44px;
+}
+</style>

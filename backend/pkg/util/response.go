@@ -19,7 +19,7 @@ type Response struct {
 
 // Success 成功响应
 func Success(data interface{}) Response {
-	return Response{Code: CodeSuccess, Msg: "success", Data: data}
+	return Response{Code: CodeSuccess, Msg: "成功", Data: data}
 }
 
 // Error 错误响应
