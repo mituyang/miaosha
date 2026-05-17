@@ -3,8 +3,8 @@
     <div class="auth-card">
       <div class="auth-copy">
         <span class="auth-kicker">Miaosha</span>
-        <h1 class="auth-title">创建账号</h1>
-        <p class="auth-subtitle">注册后即可进入秒杀前台，参与抢购并追踪自己的订单进度。</p>
+        <h1 class="auth-title">找回密码</h1>
+        <p class="auth-subtitle">通过注册邮箱接收验证码，重新设置登录密码。</p>
       </div>
 
       <div v-if="error" class="alert alert-error">{{ error }}</div>
@@ -12,33 +12,21 @@
 
       <form @submit.prevent="handleSubmit" class="auth-form">
         <div class="form-group">
-          <label class="form-label" for="register-username">用户名</label>
+          <label class="form-label" for="forgot-email">邮箱</label>
           <input
-            id="register-username"
-            v-model="form.username"
-            type="text"
-            class="form-input"
-            placeholder="至少3个字符"
-            autocomplete="username"
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="register-email">邮箱</label>
-          <input
-            id="register-email"
+            id="forgot-email"
             v-model.trim="form.email"
             type="email"
             class="form-input"
-            placeholder="请输入邮箱"
+            placeholder="请输入注册邮箱"
             autocomplete="email"
           />
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="register-password">密码</label>
+          <label class="form-label" for="forgot-password">新密码</label>
           <input
-            id="register-password"
+            id="forgot-password"
             v-model="form.password"
             type="password"
             class="form-input"
@@ -49,23 +37,23 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="register-confirm-password">确认密码</label>
+          <label class="form-label" for="forgot-confirm-password">确认新密码</label>
           <input
-            id="register-confirm-password"
+            id="forgot-confirm-password"
             v-model="form.confirmPassword"
             type="password"
             class="form-input"
-            placeholder="再次输入密码"
+            placeholder="再次输入新密码"
             autocomplete="new-password"
           />
           <p v-if="confirmPasswordHintText" :class="['form-helper', confirmPasswordHintClass]">{{ confirmPasswordHintText }}</p>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="register-email-code">邮箱验证码</label>
+          <label class="form-label" for="forgot-email-code">邮箱验证码</label>
           <div class="email-code-row">
             <input
-              id="register-email-code"
+              id="forgot-email-code"
               v-model.trim="form.emailCode"
               type="text"
               class="form-input"
@@ -79,12 +67,12 @@
         </div>
 
         <button type="submit" class="btn btn-primary btn-block" :disabled="loading">
-          {{ loading ? '注册中...' : '注册' }}
+          {{ loading ? '提交中...' : '重置密码' }}
         </button>
       </form>
 
       <div class="auth-footer">
-        已有账号？<router-link to="/login" class="link">立即登录</router-link>
+        想起密码？<router-link to="/login" class="link">返回登录</router-link>
       </div>
     </div>
 
@@ -96,10 +84,10 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="register-captcha">验证码</label>
+          <label class="form-label" for="forgot-captcha">验证码</label>
           <div class="captcha-row">
             <input
-              id="register-captcha"
+              id="forgot-captcha"
               ref="captchaInputRef"
               v-model.trim="form.captchaCode"
               type="text"
@@ -127,9 +115,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, reactive } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { getLoginCaptcha, register, sendRegisterEmailCode } from '../api'
+import { getLoginCaptcha, resetPassword, sendPasswordResetEmailCode } from '../api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -145,7 +133,6 @@ const cooldownSeconds = ref(0)
 const emailCodeExpiresSeconds = ref(0)
 let cooldownTimer = null
 const form = reactive({
-  username: '',
   email: '',
   password: '',
   confirmPassword: '',
@@ -178,7 +165,7 @@ const passwordHintClass = computed(() => {
 
 const confirmPasswordHintText = computed(() => {
   if (!form.confirmPassword) return ''
-  if (!form.password) return '请先输入密码'
+  if (!form.password) return '请先输入新密码'
   return form.password === form.confirmPassword ? '两次密码一致' : '两次密码不一致'
 })
 
@@ -193,6 +180,14 @@ const formatDurationText = seconds => {
   if (value % 3600 === 0) return `${value / 3600}小时`
   if (value % 60 === 0) return `${value / 60}分钟`
   return `${value}秒`
+}
+
+const validateEmail = () => {
+  if (!form.email || !emailPattern.test(form.email)) {
+    error.value = '请输入有效邮箱'
+    return false
+  }
+  return true
 }
 
 const fetchCaptcha = async () => {
@@ -245,14 +240,6 @@ const startCooldown = seconds => {
   }, 1000)
 }
 
-const validateEmail = () => {
-  if (!form.email || !emailPattern.test(form.email)) {
-    error.value = '请输入有效邮箱'
-    return false
-  }
-  return true
-}
-
 const handleSendEmailCode = async () => {
   error.value = ''
   success.value = ''
@@ -265,7 +252,7 @@ const handleSendEmailCode = async () => {
 
   sendingEmailCode.value = true
   try {
-    const res = await sendRegisterEmailCode(form.email, captchaId.value, form.captchaCode)
+    const res = await sendPasswordResetEmailCode(form.email, captchaId.value, form.captchaCode)
     if (res.data.code === 0) {
       emailCodeExpiresSeconds.value = Number(res.data.data?.expires_in_seconds || 0)
       success.value = emailCodeExpiresText.value ? `邮箱验证码已发送，${emailCodeExpiresText.value}后过期` : '邮箱验证码已发送'
@@ -288,13 +275,9 @@ const handleSubmit = async () => {
   error.value = ''
   success.value = ''
 
-  if (!form.username || form.username.length < 3) {
-    error.value = '用户名至少3个字符'
-    return
-  }
   if (!validateEmail()) return
   if (!form.password || form.password.length < 6) {
-    error.value = '密码至少6个字符'
+    error.value = '密码至少6位'
     return
   }
   if (form.password !== form.confirmPassword) {
@@ -308,15 +291,15 @@ const handleSubmit = async () => {
 
   loading.value = true
   try {
-    const res = await register(form.username, form.email, form.password, form.emailCode)
+    const res = await resetPassword(form.email, form.emailCode, form.password)
     if (res.data.code === 0) {
-      success.value = '注册成功，即将跳转登录...'
+      success.value = '密码已重置，即将跳转登录...'
       setTimeout(() => router.push('/login'), 1500)
     } else {
-      error.value = res.data.msg
+      error.value = res.data.msg || '密码重置失败'
     }
   } catch (e) {
-    error.value = e.response?.data?.msg || '注册失败'
+    error.value = e.response?.data?.msg || '密码重置失败'
   } finally {
     loading.value = false
   }

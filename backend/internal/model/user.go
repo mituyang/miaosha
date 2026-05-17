@@ -11,6 +11,7 @@ const (
 type User struct {
 	ID        uint64    `gorm:"primaryKey;autoIncrement"`
 	Username  string    `gorm:"type:varchar(50);not null;uniqueIndex:uk_username"`
+	Email     string    `gorm:"type:varchar(255);not null;index:idx_users_email"`
 	Password  string    `gorm:"type:varchar(255);not null"`
 	Status    uint8     `gorm:"not null;default:1;index"`
 	CreatedAt time.Time `gorm:"not null;default:CURRENT_TIMESTAMP"`

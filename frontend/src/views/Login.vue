@@ -58,6 +58,8 @@
       </form>
 
       <div class="auth-footer">
+        <router-link to="/forgot-password" class="link">忘记密码？</router-link>
+        <span class="footer-separator">·</span>
         还没有账号？<router-link to="/register" class="link">立即注册</router-link>
       </div>
     </div>
@@ -114,6 +116,7 @@ const handleSubmit = async () => {
     if (res.data.code === 0) {
       localStorage.setItem('token', res.data.data.token)
       localStorage.setItem('username', form.username)
+      window.dispatchEvent(new Event('auth:changed'))
       router.push('/seckill')
     } else {
       error.value = res.data.msg
@@ -166,6 +169,11 @@ onMounted(() => {
   width: 132px;
   height: 44px;
   object-fit: contain;
+}
+
+.footer-separator {
+  margin: 0 8px;
+  color: var(--text-muted);
 }
 
 @media (max-width: 420px) {

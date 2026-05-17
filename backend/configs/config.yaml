@@ -89,3 +89,16 @@ jwt:
 admin:
   username: ""                  # 必须通过环境变量 ADMIN_USERNAME 提供
   password: ""                  # 必须通过环境变量 ADMIN_PASSWORD 提供
+
+email:
+  host: smtp.qq.com
+  port: 587
+  username: ""                  # QQ 邮箱账号，通过环境变量 EMAIL_USERNAME 提供
+  password: ""                  # QQ 邮箱 SMTP 授权码，通过环境变量 EMAIL_PASSWORD 提供
+  from: ""                      # 发件邮箱，通过环境变量 EMAIL_FROM 提供
+  from_name: "秒杀系统"
+  encryption: starttls          # QQ 邮箱 587 端口使用 starttls
+  code_length: 6
+  code_ttl: "5m"
+  send_interval: "60s"
+  subject: "秒杀系统验证码"

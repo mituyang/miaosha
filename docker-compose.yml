@@ -153,6 +153,17 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env}
       STARTUP_FLUSH_REDIS_ON_START: ${STARTUP_FLUSH_REDIS_ON_START:-false}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-smtp.qq.com}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-587}
+      EMAIL_USERNAME: ${EMAIL_USERNAME:-}
+      EMAIL_PASSWORD: ${EMAIL_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-秒杀系统}
+      EMAIL_ENCRYPTION: ${EMAIL_ENCRYPTION:-starttls}
+      EMAIL_CODE_LENGTH: ${EMAIL_CODE_LENGTH:-6}
+      EMAIL_CODE_TTL: ${EMAIL_CODE_TTL:-5m}
+      EMAIL_SEND_INTERVAL: ${EMAIL_SEND_INTERVAL:-60s}
+      EMAIL_SUBJECT: ${EMAIL_SUBJECT:-秒杀系统验证码}
     volumes:
       - ./backend/configs/config.docker.yaml:/app/configs/config.yaml
     depends_on:

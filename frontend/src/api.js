@@ -1,6 +1,10 @@
 import axios from 'axios'
 import router from './router'
 
+const notifyAuthChanged = () => {
+  window.dispatchEvent(new Event('auth:changed'))
+}
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 10000
@@ -26,6 +30,7 @@ api.interceptors.response.use(
       }
       localStorage.removeItem('token')
       localStorage.removeItem('username')
+      notifyAuthChanged()
       router.push('/login')
     }
     return Promise.reject(err)
@@ -33,13 +38,42 @@ api.interceptors.response.use(
 )
 
 // 用户注册
-export const register = (username, password) => {
-  return api.post('/auth/register', { username, password })
+export const register = (username, email, password, emailCode) => {
+  return api.post('/auth/register', {
+    username,
+    email,
+    password,
+    email_code: emailCode
+  })
 }
 
 // 获取登录验证码
 export const getLoginCaptcha = () => {
   return api.get('/auth/captcha')
+}
+
+export const sendRegisterEmailCode = (email, captchaId, captchaCode) => {
+  return api.post('/auth/email-code', {
+    email,
+    captcha_id: captchaId,
+    captcha_code: captchaCode
+  })
+}
+
+export const sendPasswordResetEmailCode = (email, captchaId, captchaCode) => {
+  return api.post('/auth/password-reset/email-code', {
+    email,
+    captcha_id: captchaId,
+    captcha_code: captchaCode
+  })
+}
+
+export const resetPassword = (email, emailCode, password) => {
+  return api.post('/auth/password-reset', {
+    email,
+    email_code: emailCode,
+    password
+  })
 }
 
 // 用户登录

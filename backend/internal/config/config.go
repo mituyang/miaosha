@@ -18,6 +18,7 @@ type Config struct {
 	Timeout   TimeoutConfig   `yaml:"timeout"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	Admin     AdminConfig     `yaml:"admin"`
+	Email     EmailConfig     `yaml:"email"`
 	Snowflake SnowflakeConfig `yaml:"snowflake"`
 	Seckill   SeckillConfig   `yaml:"seckill"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
@@ -59,6 +60,20 @@ type JWTConfig struct {
 type AdminConfig struct {
 	Username string `yaml:"username"`
 	Password string `yaml:"password"`
+}
+
+type EmailConfig struct {
+	Host         string `yaml:"host"`
+	Port         int    `yaml:"port"`
+	Username     string `yaml:"username"`
+	Password     string `yaml:"password"`
+	From         string `yaml:"from"`
+	FromName     string `yaml:"from_name"`
+	Encryption   string `yaml:"encryption"`
+	CodeLength   int    `yaml:"code_length"`
+	CodeTTL      string `yaml:"code_ttl"`
+	SendInterval string `yaml:"send_interval"`
+	Subject      string `yaml:"subject"`
 }
 
 type ServerConfig struct {
@@ -221,6 +236,40 @@ func applyEnvOverrides(cfg *Config) error {
 		return err
 	}
 	cfg.Admin.Password = adminPassword
+
+	if v, ok := os.LookupEnv("EMAIL_SMTP_HOST"); ok {
+		cfg.Email.Host = v
+	}
+	if err := setIntFromEnv("EMAIL_SMTP_PORT", &cfg.Email.Port); err != nil {
+		return err
+	}
+	if v, ok := os.LookupEnv("EMAIL_USERNAME"); ok {
+		cfg.Email.Username = v
+	}
+	if v, ok := os.LookupEnv("EMAIL_PASSWORD"); ok {
+		cfg.Email.Password = v
+	}
+	if v, ok := os.LookupEnv("EMAIL_FROM"); ok {
+		cfg.Email.From = v
+	}
+	if v, ok := os.LookupEnv("EMAIL_FROM_NAME"); ok {
+		cfg.Email.FromName = v
+	}
+	if v, ok := os.LookupEnv("EMAIL_ENCRYPTION"); ok {
+		cfg.Email.Encryption = v
+	}
+	if err := setIntFromEnv("EMAIL_CODE_LENGTH", &cfg.Email.CodeLength); err != nil {
+		return err
+	}
+	if v, ok := os.LookupEnv("EMAIL_CODE_TTL"); ok {
+		cfg.Email.CodeTTL = v
+	}
+	if v, ok := os.LookupEnv("EMAIL_SEND_INTERVAL"); ok {
+		cfg.Email.SendInterval = v
+	}
+	if v, ok := os.LookupEnv("EMAIL_SUBJECT"); ok {
+		cfg.Email.Subject = v
+	}
 
 	return nil
 }

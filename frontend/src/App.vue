@@ -21,7 +21,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -30,7 +30,7 @@ const route = useRoute()
 const token = ref(localStorage.getItem('token') || '')
 const username = ref(localStorage.getItem('username') || '')
 const isLoggedIn = computed(() => !!token.value)
-const showNavbar = computed(() => isLoggedIn.value)
+const showNavbar = computed(() => isLoggedIn.value && !route.meta.guest)
 
 const syncAuthState = () => {
   token.value = localStorage.getItem('token') || ''
@@ -43,6 +43,17 @@ const handleLogout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   syncAuthState()
+  window.dispatchEvent(new Event('auth:changed'))
   router.push('/login')
 }
+
+onMounted(() => {
+  window.addEventListener('auth:changed', syncAuthState)
+  window.addEventListener('storage', syncAuthState)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('auth:changed', syncAuthState)
+  window.removeEventListener('storage', syncAuthState)
+})
 </script>

@@ -24,7 +24,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 	goodsSvc := service.NewGoodsService()
 	goodsHandler := handler.NewGoodsHandler(goodsSvc)
 
-	authSvc := service.NewAuthService(jwtInstance)
+	authSvc := service.NewAuthService(jwtInstance, cfg.Email)
 	authHandler := handler.NewAuthHandler(authSvc)
 
 	orderSvc := service.NewOrderService()
@@ -40,6 +40,9 @@ func Setup(cfg *config.Config) *gin.Engine {
 		auth := api.Group("/auth")
 		{
 			auth.GET("/captcha", authHandler.GetCaptcha)
+			auth.POST("/email-code", authHandler.SendEmailCode)
+			auth.POST("/password-reset/email-code", authHandler.SendPasswordResetEmailCode)
+			auth.POST("/password-reset", authHandler.ResetPassword)
 			auth.POST("/register", authHandler.Register)
 			auth.POST("/login", authHandler.Login)
 		}

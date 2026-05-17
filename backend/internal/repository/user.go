@@ -28,6 +28,16 @@ func (r *UserRepository) FindByUsername(username string) (*model.User, error) {
 	return &user, nil
 }
 
+// FindByEmail 根据邮箱查找用户
+func (r *UserRepository) FindByEmail(email string) (*model.User, error) {
+	var user model.User
+	err := database.DB.Where("email = ?", email).First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetByID 根据 ID 查询用户
 func (r *UserRepository) GetByID(userID uint64) (*model.User, error) {
 	var user model.User
@@ -83,6 +93,11 @@ func (r *UserRepository) ListPage(filter UserFilter, page, pageSize int) ([]Admi
 // UpdateStatus 更新用户状态
 func (r *UserRepository) UpdateStatus(userID uint64, status uint8) error {
 	return database.DB.Model(&model.User{}).Where("id = ?", userID).Update("status", status).Error
+}
+
+// UpdatePassword 更新用户密码。
+func (r *UserRepository) UpdatePassword(userID uint64, password string) error {
+	return database.DB.Model(&model.User{}).Where("id = ?", userID).Update("password", password).Error
 }
 
 type UserStats struct {

@@ -84,11 +84,13 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE `users` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `username` varchar(50) NOT NULL COMMENT '用户名',
+  `email` varchar(255) NOT NULL DEFAULT '' COMMENT '邮箱',
   `password` varchar(255) NOT NULL COMMENT '密码哈希',
   `status` tinyint unsigned NOT NULL DEFAULT 1 COMMENT '用户状态: 0-禁用, 1-启用',
   `created_at` datetime(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_username` (`username`),
+  KEY `idx_users_email` (`email`),
   KEY `idx_users_status` (`status`),
   KEY `idx_users_created_at` (`created_at`),
   KEY `idx_users_status_created_at` (`status`, `created_at`)
