@@ -15,6 +15,7 @@ import (
 	"os"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,15 +27,18 @@ import (
 
 // 配置
 const (
-	GoodsID   = 1 // 测试商品ID
-	Quantity  = 1 // 每次购买数量
-	TokenFile = "tokens.txt"
+	DefaultGoodsID = 1 // 测试商品ID
+	Quantity       = 1 // 每次购买数量
+	TokenFile      = "tokens.txt"
 )
 
 var (
-	BaseURL     string
-	AdminSecret string
-	MySQLDSN    string
+	BaseURL       string
+	AdminUsername string
+	AdminPassword string
+	MySQLDSN      string
+	ActivityID    int
+	GoodsID       int
 )
 
 // HTTP Transport（压测时动态创建，便于强制关闭）
@@ -134,6 +138,18 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+func getEnvInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
 func loadDotEnvCandidates(paths ...string) {
 	for _, p := range paths {
 		if loadDotEnvFile(p) {
@@ -183,8 +199,11 @@ func initRuntimeConfig() {
 	loadDotEnvCandidates("../.env", ".env")
 
 	BaseURL = getEnv("BASE_URL", "http://localhost:8080")
-	AdminSecret = strings.TrimSpace(os.Getenv("ADMIN_SECRET"))
+	AdminUsername = strings.TrimSpace(os.Getenv("ADMIN_USERNAME"))
+	AdminPassword = strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
 	MySQLDSN = getEnv("MYSQL_DSN", "root:root123@tcp(127.0.0.1:13306)/seckill?parseTime=true&loc=Local")
+	ActivityID = getEnvInt("ACTIVITY_ID", 0)
+	GoodsID = getEnvInt("GOODS_ID", DefaultGoodsID)
 }
 
 func (c *TimeSeriesCollector) Add(point TimeSeriesPoint) {
@@ -203,12 +222,43 @@ func (c *TimeSeriesCollector) GetPoints() []TimeSeriesPoint {
 
 // 预热库存
 func warmUp() error {
-	if AdminSecret == "" {
-		return fmt.Errorf("ADMIN_SECRET is required (load it from .env)")
+	if AdminUsername == "" || AdminPassword == "" {
+		return fmt.Errorf("ADMIN_USERNAME and ADMIN_PASSWORD are required (load them from .env)")
+	}
+
+	body, _ := json.Marshal(map[string]string{
+		"username": AdminUsername,
+		"password": AdminPassword,
+	})
+	loginReq, _ := http.NewRequest("POST", BaseURL+"/api/admin/login", bytes.NewReader(body))
+	loginReq.Header.Set("Content-Type", "application/json")
+
+	loginResp, err := httpClient.Do(loginReq)
+	if err != nil {
+		return err
+	}
+	defer loginResp.Body.Close()
+
+	var loginResult Response
+	if err := json.NewDecoder(loginResp.Body).Decode(&loginResult); err != nil {
+		return err
+	}
+	if loginResult.Code != 0 {
+		return fmt.Errorf("admin login failed: %s", loginResult.Msg)
+	}
+
+	var loginData struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(loginResult.Data, &loginData); err != nil {
+		return err
+	}
+	if loginData.Token == "" {
+		return fmt.Errorf("admin login token is empty")
 	}
 
 	req, _ := http.NewRequest("POST", BaseURL+"/api/admin/warmup", nil)
-	req.Header.Set("X-Admin-Secret", AdminSecret)
+	req.Header.Set("Authorization", "Bearer "+loginData.Token)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -227,8 +277,14 @@ func warmUp() error {
 }
 
 // 执行秒杀请求
-func doSeckill(ctx context.Context, token string, goodsID int, quantity int) (int, time.Duration, error) {
-	body, _ := json.Marshal(map[string]int{"goods_id": goodsID, "quantity": quantity})
+func doSeckill(ctx context.Context, token string, activityID int, goodsID int, quantity int) (int, time.Duration, error) {
+	payload := map[string]int{"quantity": quantity}
+	if activityID > 0 {
+		payload["activity_id"] = activityID
+	} else {
+		payload["goods_id"] = goodsID
+	}
+	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequestWithContext(ctx, "POST", BaseURL+"/api/seckill/buy", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -250,8 +306,12 @@ func doSeckill(ctx context.Context, token string, goodsID int, quantity int) (in
 }
 
 // 查询库存
-func getStock(goodsID int) (int, error) {
-	resp, err := httpClient.Get(fmt.Sprintf("%s/api/seckill/stock/%d", BaseURL, goodsID))
+func getStock(activityID int, goodsID int) (int, error) {
+	url := fmt.Sprintf("%s/api/seckill/stock/%d", BaseURL, goodsID)
+	if activityID > 0 {
+		url = fmt.Sprintf("%s/api/seckill/activity/%d/stock", BaseURL, activityID)
+	}
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return 0, err
 	}
@@ -270,6 +330,32 @@ func getStock(goodsID int) (int, error) {
 	return result.Data.Stock, nil
 }
 
+func resolveActivityID() int {
+	if ActivityID > 0 {
+		return ActivityID
+	}
+
+	resp, err := httpClient.Get(BaseURL + "/api/activities")
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code int `json:"code"`
+		Data []struct {
+			ID int `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0
+	}
+	if result.Code != 0 || len(result.Data) == 0 {
+		return 0
+	}
+	return result.Data[0].ID
+}
+
 // 订单落库 TPS统计结果
 type E2EStats struct {
 	TotalOrders  int64
@@ -280,7 +366,7 @@ type E2EStats struct {
 }
 
 // 查询订单落库 TPS（从MySQL统计）
-func getE2EStats(goodsID int) (*E2EStats, error) {
+func getE2EStats(activityID int, goodsID int) (*E2EStats, error) {
 	db, err := sql.Open("mysql", MySQLDSN)
 	if err != nil {
 		return nil, err
@@ -288,14 +374,27 @@ func getE2EStats(goodsID int) (*E2EStats, error) {
 	defer db.Close()
 
 	var stats E2EStats
-	err = db.QueryRow(`
+	query := `
 		SELECT 
 			COUNT(*) as total_orders,
 			MIN(request_time) as first_request,
 			MAX(write_time) as last_write
 		FROM orders 
 		WHERE goods_id = ?
-	`, goodsID).Scan(&stats.TotalOrders, &stats.FirstRequest, &stats.LastWrite)
+	`
+	arg := goodsID
+	if activityID > 0 {
+		query = `
+			SELECT 
+				COUNT(*) as total_orders,
+				MIN(request_time) as first_request,
+				MAX(write_time) as last_write
+			FROM orders 
+			WHERE activity_id = ?
+		`
+		arg = activityID
+	}
+	err = db.QueryRow(query, arg).Scan(&stats.TotalOrders, &stats.FirstRequest, &stats.LastWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -663,8 +762,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	stock, _ := getStock(GoodsID)
-	log("当前库存: %d", stock)
+	resolvedActivityID := resolveActivityID()
+	stock, _ := getStock(resolvedActivityID, GoodsID)
+	log("当前活动: %d, 当前库存: %d", resolvedActivityID, stock)
 
 	// 3. 开始压测
 	log("创建 goroutine...")
@@ -709,7 +809,7 @@ func main() {
 					idx := atomic.AddInt64(&userIndex, 1) % totalTokens
 					token := tokens[idx]
 
-					code, latency, err := doSeckill(ctx, token, GoodsID, Quantity)
+					code, latency, err := doSeckill(ctx, token, resolvedActivityID, GoodsID, Quantity)
 					atomic.AddInt64(&stats.TotalRequests, 1)
 
 					if err != nil {
@@ -841,7 +941,7 @@ func main() {
 	forceCloseHTTPClient()
 
 	// 4. 输出结果
-	finalStock, _ := getStock(GoodsID)
+	finalStock, _ := getStock(resolvedActivityID, GoodsID)
 	completedRequests := stats.TotalRequests - stats.Canceled
 	avgLatency := float64(stats.CompletedLatency) / float64(completedRequests) / 1e6 // ms
 
@@ -892,7 +992,7 @@ func main() {
 		log("等待订单写入MySQL完成...")
 		time.Sleep(10 * time.Second) // 等待 Worker 处理
 
-		e2eStatsResult, err := getE2EStats(GoodsID)
+		e2eStatsResult, err := getE2EStats(resolvedActivityID, GoodsID)
 		if err != nil {
 			log("查询订单落库 TPS失败: %v", err)
 		} else {

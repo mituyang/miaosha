@@ -170,8 +170,12 @@ curl -X POST http://localhost:8080/api/auth/login \
 
 ### 3. 预热库存
 ```bash
+ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"<admin-username>","password":"<admin-password>"}' | jq -r '.data.token')
+
 curl -X POST http://localhost:8080/api/admin/warmup \
-  -H "X-Admin-Secret: <admin-secret>"
+  -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
 
 ### 4. 参与秒杀
@@ -252,7 +256,7 @@ k6 run benchmark_k6.js
 常用环境变量：
 
 - `BASE_URL`: 默认 `http://localhost:8080`
-- `ADMIN_SECRET`: 必填，压测前用于调用预热接口
+- `ADMIN_USERNAME` / `ADMIN_PASSWORD`: 必填，压测前用于登录后台并调用预热接口
 - `TOKEN_FILE`: 默认 `tokens_100k.txt`
 - `GOODS_ID`: 默认 `1`
 - `QUANTITY`: 默认 `1`
@@ -269,7 +273,7 @@ k6 run benchmark_k6.js
 说明：
 
 - `benchmark_k6.js` 是当前默认压测入口，主要覆盖 HTTP 压测、业务码统计和库存预热。
-- 默认会自动加载项目根目录 `.env`，方便读取 `ADMIN_SECRET`、`BASE_URL` 等配置。
+- 默认会自动加载项目根目录 `.env`，方便读取 `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`BASE_URL` 等配置。
 - 每次执行会在 `test/` 目录生成 `benchmark_k6_<timestamp>.html` 和 `benchmark_k6_<timestamp>.json`。
 - `benchmark.go` 已保留为历史 Go 脚本，仅作参考，不再作为默认压测方案。
 
@@ -302,19 +306,20 @@ redis:
 - `REDIS_ADDR` `REDIS_PASSWORD` `REDIS_DB`
 - `KAFKA_BROKERS`（逗号分隔）`KAFKA_TOPIC` `KAFKA_GROUP`
 - `JWT_SECRET` `JWT_EXPIRE_HOURS`
-- `ADMIN_SECRET`
+- `ADMIN_USERNAME` `ADMIN_PASSWORD`
 - `SERVER_PORT`
 - `STARTUP_FLUSH_REDIS_ON_START`
 
 注意：
-- `JWT_SECRET` 和 `ADMIN_SECRET` 为必填项，程序启动时会强制校验。
-- 这两个字段不会再从 `config.yaml`/`config.docker.yaml` 读取，必须由环境变量提供（建议放在项目根目录 `.env`）。
+- `JWT_SECRET`、`ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 为必填项，程序启动时会强制校验。
+- 这些字段不会再从 `config.yaml`/`config.docker.yaml` 读取，必须由环境变量提供（建议放在项目根目录 `.env`）。
 
 示例：
 ```bash
 export MYSQL_PASSWORD='strong-password'
 export JWT_SECRET='base64-or-random-secret'
-export ADMIN_SECRET='random-admin-secret'
+export ADMIN_USERNAME='admin'
+export ADMIN_PASSWORD='strong-admin-password'
 export STARTUP_FLUSH_REDIS_ON_START=false
 ```
 
@@ -400,7 +405,7 @@ CREATE TABLE goods (
 
 #### 预热库存
 - **POST** `/api/admin/warmup`
-- Headers: `X-Admin-Secret: <secret>`
+- Headers: `Authorization: Bearer <admin-token>`
 
 ### 订单接口
 

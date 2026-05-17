@@ -24,7 +24,12 @@ redis:
 
 # 秒杀限购配置
 seckill:
-  max_buy_limit: 5             # 每用户每商品最大购买数量
+  max_buy_limit: 5             # 每用户每活动最大购买数量
+  default_activity:
+    enabled: true              # 是否为现有商品自动补启用的默认活动
+    title_template: "{goods_name} 秒杀活动"
+    start_offset: "-24h"       # 默认活动开始时间 = 当前时间 + 该偏移
+    end_offset: "8760h"        # 默认活动结束时间 = 当前时间 + 该偏移
 
 # 用户级限流配置（令牌桶算法）
 rate_limit:
@@ -82,4 +87,5 @@ jwt:
   expire_hours: 240000
 
 admin:
-  secret: ""                    # 必须通过环境变量 ADMIN_SECRET 提供
+  username: ""                  # 必须通过环境变量 ADMIN_USERNAME 提供
+  password: ""                  # 必须通过环境变量 ADMIN_PASSWORD 提供

@@ -83,7 +83,7 @@ func (s *AdminService) collectRedisObservability(ctx context.Context) (*dto.Admi
 		return nil, err
 	}
 
-	goodsRuntime, err := collectRedisGoodsRuntime(ctx, goods)
+	goodsRuntime, err := collectRedisGoodsRuntime(ctx, goods, s.activitySvc)
 	if err != nil {
 		return nil, err
 	}
@@ -100,17 +100,17 @@ func (s *AdminService) collectRedisObservability(ctx context.Context) (*dto.Admi
 }
 
 func collectRedisKeyspace(ctx context.Context) (dto.AdminRedisKeyspace, error) {
-	segmentKeys, err := countKeysByPattern(ctx, "seckill:segment:*")
+	segmentKeys, err := countKeysByPattern(ctx, "seckill:activity:segment:*")
 	if err != nil {
 		return dto.AdminRedisKeyspace{}, fmt.Errorf("count redis segment keys failed: %w", err)
 	}
 
-	boughtKeys, err := countKeysByPattern(ctx, "seckill:bought:*")
+	boughtKeys, err := countKeysByPattern(ctx, "seckill:activity:bought:*")
 	if err != nil {
 		return dto.AdminRedisKeyspace{}, fmt.Errorf("count redis bought keys failed: %w", err)
 	}
 
-	processedKeys, err := countKeysByPattern(ctx, "seckill:processed:*")
+	processedKeys, err := countKeysByPattern(ctx, "seckill:activity:processed:*")
 	if err != nil {
 		return dto.AdminRedisKeyspace{}, fmt.Errorf("count redis processed keys failed: %w", err)
 	}
@@ -169,23 +169,24 @@ func collectRedisWarmupLocks(ctx context.Context) ([]dto.AdminRedisWarmupLock, e
 	return locks, nil
 }
 
-func collectRedisGoodsRuntime(ctx context.Context, goods []model.Goods) ([]dto.AdminRedisGoodsRuntime, error) {
+func collectRedisGoodsRuntime(ctx context.Context, goods []model.Goods, activitySvc *ActivityService) ([]dto.AdminRedisGoodsRuntime, error) {
 	sort.Slice(goods, func(i, j int) bool {
 		return goods[i].ID < goods[j].ID
 	})
 
 	result := make([]dto.AdminRedisGoodsRuntime, 0, len(goods))
 	for _, item := range goods {
+		activityID, activityTitle := defaultActivityForRuntime(ctx, item.ID, activitySvc)
 		segmentKeys := make([]string, 0, redis.SegmentCount)
 		for segmentID := 0; segmentID < redis.SegmentCount; segmentID++ {
-			segmentKeys = append(segmentKeys, redis.SegmentStockKey(item.ID, segmentID))
+			segmentKeys = append(segmentKeys, redis.SegmentStockKey(activityID, segmentID))
 		}
 
 		pipe := redis.Client.Pipeline()
 		segmentCmd := pipe.MGet(ctx, segmentKeys...)
-		boughtCmd := pipe.HGetAll(ctx, redis.BoughtKey(item.ID))
-		processedCmd := pipe.HGetAll(ctx, redis.ProcessedKey(item.ID))
-		statusCmd := pipe.Get(ctx, redis.GoodsStatusKey(item.ID))
+		boughtCmd := pipe.HGetAll(ctx, redis.BoughtKey(activityID))
+		processedCmd := pipe.HGetAll(ctx, redis.ProcessedKey(activityID))
+		metaCmd := pipe.HGetAll(ctx, redis.ActivityMetaKey(activityID))
 		_, err := pipe.Exec(ctx)
 		if err != nil && err != redisLib.Nil {
 			return nil, fmt.Errorf("load redis goods runtime failed: goods_id=%d, err=%w", item.ID, err)
@@ -205,10 +206,9 @@ func collectRedisGoodsRuntime(ctx context.Context, goods []model.Goods) ([]dto.A
 		boughtMap := boughtCmd.Val()
 		processedMap := processedCmd.Val()
 		onSale := false
-		if err := statusCmd.Err(); err == nil {
-			onSale = statusCmd.Val() == "1"
-		} else if err != redisLib.Nil {
-			return nil, fmt.Errorf("get redis goods status failed: goods_id=%d, err=%w", item.ID, err)
+		meta := metaCmd.Val()
+		if len(meta) > 0 {
+			onSale = meta["goods_on_sale"] == "1" && meta["warmup_status"] == "1"
 		}
 
 		boughtQuantity := sumRedisHashValues(boughtMap)
@@ -220,7 +220,9 @@ func collectRedisGoodsRuntime(ctx context.Context, goods []model.Goods) ([]dto.A
 
 		result = append(result, dto.AdminRedisGoodsRuntime{
 			GoodsID:           item.ID,
+			ActivityID:        activityID,
 			GoodsName:         item.ProductName,
+			ActivityTitle:     activityTitle,
 			OnSale:            onSale,
 			TotalStock:        totalStock,
 			BoughtUsers:       int64(len(boughtMap)),
@@ -233,6 +235,18 @@ func collectRedisGoodsRuntime(ctx context.Context, goods []model.Goods) ([]dto.A
 	}
 
 	return result, nil
+}
+
+func defaultActivityForRuntime(ctx context.Context, goodsID uint64, activitySvc *ActivityService) (uint64, string) {
+	if activitySvc != nil && activitySvc.activityRepo != nil {
+		if activity, err := activitySvc.activityRepo.FindDefaultByGoodsID(goodsID); err == nil {
+			return activity.ID, activity.Title
+		}
+	}
+	if activityID, ok, err := redis.GetDefaultActivityID(ctx, goodsID); err == nil && ok {
+		return activityID, ""
+	}
+	return goodsID, ""
 }
 
 func (s *AdminService) collectKafkaObservability(ctx context.Context) (*dto.AdminKafkaObservability, error) {

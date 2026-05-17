@@ -58,15 +58,42 @@ func JWTAuth(j *jwt.JWT) gin.HandlerFunc {
 	}
 }
 
-// AdminAuth 管理员认证中间件 (Header 校验)
-func AdminAuth(secret string) gin.HandlerFunc {
+// AdminJWTAuth 管理员 JWT 认证中间件
+func AdminJWTAuth(j *jwt.JWT) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		adminSecret := c.GetHeader("X-Admin-Secret")
-		if adminSecret != secret {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "缺少后台登录凭证"})
+			c.Abort()
+			return
+		}
+
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": "后台登录凭证格式错误"})
+			c.Abort()
+			return
+		}
+
+		claims, err := j.ParseToken(parts[1])
+		if err != nil {
+			msg := "后台登录凭证无效"
+			if err == jwt.ErrTokenExpired {
+				msg = "后台登录凭证已过期"
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "msg": msg})
+			c.Abort()
+			return
+		}
+
+		if claims.Role != jwt.RoleAdmin {
 			c.JSON(http.StatusForbidden, gin.H{"code": 403, "msg": "无权访问后台"})
 			c.Abort()
 			return
 		}
+
+		c.Set("admin_id", claims.UserID)
+		c.Set("admin_username", claims.Username)
 		c.Next()
 	}
 }

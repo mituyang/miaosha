@@ -19,6 +19,8 @@ func Setup(cfg *config.Config) *gin.Engine {
 	// 初始化 service 和 handler
 	seckillSvc := service.NewSeckillService(cfg)
 	seckillHandler := handler.NewSeckillHandler(seckillSvc)
+	activitySvc := service.NewActivityService(cfg, seckillSvc)
+	activityHandler := handler.NewActivityHandler(activitySvc, seckillSvc)
 	goodsSvc := service.NewGoodsService()
 	goodsHandler := handler.NewGoodsHandler(goodsSvc)
 
@@ -28,7 +30,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 	orderSvc := service.NewOrderService()
 	orderHandler := handler.NewOrderHandler(orderSvc)
 
-	adminSvc := service.NewAdminService(seckillSvc)
+	adminSvc := service.NewAdminService(seckillSvc, activitySvc, jwtInstance)
 	adminHandler := handler.NewAdminHandler(adminSvc)
 
 	// API 路由组
@@ -47,6 +49,7 @@ func Setup(cfg *config.Config) *gin.Engine {
 		{
 			// 公开接口
 			seckill.GET("/stock/:goods_id", seckillHandler.GetStock)
+			seckill.GET("/activity/:activity_id/stock", activityHandler.GetActivityStock)
 
 			// 需要认证的接口（带限流）
 			seckill.POST("/buy", middleware.JWTAuth(jwtInstance), middleware.RateLimit(cfg), seckillHandler.DoSeckill)
@@ -58,6 +61,11 @@ func Setup(cfg *config.Config) *gin.Engine {
 			goods.GET("", goodsHandler.ListOnSaleGoods)
 		}
 
+		activities := api.Group("/activities")
+		{
+			activities.GET("", activityHandler.ListPublicActivities)
+		}
+
 		// 订单接口 (需要认证，带限流)
 		orders := api.Group("/orders", middleware.JWTAuth(jwtInstance), middleware.RateLimit(cfg))
 		{
@@ -66,27 +74,38 @@ func Setup(cfg *config.Config) *gin.Engine {
 			orders.POST("/:order_id/cancel", orderHandler.CancelOrder)
 		}
 
-		// 管理员接口 (Header 校验)
-		admin := api.Group("/admin", middleware.AdminAuth(cfg.Admin.Secret))
+		// 管理员接口
+		admin := api.Group("/admin")
 		{
-			admin.GET("/ping", adminHandler.Ping)
-			admin.GET("/goods", adminHandler.ListGoods)
-			admin.POST("/goods", adminHandler.CreateGoods)
-			admin.PUT("/goods/:goods_id", adminHandler.UpdateGoods)
-			admin.DELETE("/goods/:goods_id", adminHandler.DeleteGoods)
+			admin.POST("/login", adminHandler.Login)
 
-			admin.GET("/orders", adminHandler.ListOrders)
-			admin.GET("/orders/:order_id", adminHandler.GetOrderDetail)
+			adminAuth := admin.Group("", middleware.AdminJWTAuth(jwtInstance))
+			{
+				adminAuth.GET("/ping", adminHandler.Ping)
+				adminAuth.GET("/goods", adminHandler.ListGoods)
+				adminAuth.POST("/goods", adminHandler.CreateGoods)
+				adminAuth.PUT("/goods/:goods_id", adminHandler.UpdateGoods)
+				adminAuth.DELETE("/goods/:goods_id", adminHandler.DeleteGoods)
 
-			admin.GET("/users", adminHandler.ListUsers)
-			admin.PUT("/users/:user_id/status", adminHandler.UpdateUserStatus)
+				adminAuth.GET("/activities", activityHandler.ListActivities)
+				adminAuth.POST("/activities", activityHandler.CreateActivity)
+				adminAuth.PUT("/activities/:activity_id", activityHandler.UpdateActivity)
+				adminAuth.POST("/activities/:activity_id/warmup", activityHandler.WarmUpActivity)
+				adminAuth.PUT("/activities/:activity_id/status", activityHandler.UpdateActivityStatus)
 
-			admin.POST("/warmup", adminHandler.WarmUpAll)
-			admin.POST("/warmup/:goods_id", adminHandler.WarmUpGoods)
+				adminAuth.GET("/orders", adminHandler.ListOrders)
+				adminAuth.GET("/orders/:order_id", adminHandler.GetOrderDetail)
 
-			admin.GET("/stats", adminHandler.GetStats)
-			admin.POST("/stats/rebuild", adminHandler.RebuildStats)
-			admin.GET("/observability", adminHandler.GetObservability)
+				adminAuth.GET("/users", adminHandler.ListUsers)
+				adminAuth.PUT("/users/:user_id/status", adminHandler.UpdateUserStatus)
+
+				adminAuth.POST("/warmup", adminHandler.WarmUpAll)
+				adminAuth.POST("/warmup/:goods_id", adminHandler.WarmUpGoods)
+
+				adminAuth.GET("/stats", adminHandler.GetStats)
+				adminAuth.POST("/stats/rebuild", adminHandler.RebuildStats)
+				adminAuth.GET("/observability", adminHandler.GetObservability)
+			}
 		}
 	}
 

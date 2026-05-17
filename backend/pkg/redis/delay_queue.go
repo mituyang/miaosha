@@ -23,11 +23,12 @@ const (
 
 // OrderTimeoutItem 订单超时队列项
 type OrderTimeoutItem struct {
-	OrderID   uint64 `json:"order_id"`
-	UserID    uint64 `json:"user_id"`
-	GoodsID   uint64 `json:"goods_id"`
-	SegmentID int    `json:"segment_id"`
-	Quantity  int    `json:"quantity"` // 购买数量
+	OrderID    uint64 `json:"order_id"`
+	UserID     uint64 `json:"user_id"`
+	GoodsID    uint64 `json:"goods_id"`
+	ActivityID uint64 `json:"activity_id"`
+	SegmentID  int    `json:"segment_id"`
+	Quantity   int    `json:"quantity"` // 购买数量
 }
 
 // LoadDelayQueueScript 加载延迟队列 Lua 脚本
@@ -42,13 +43,14 @@ func LoadDelayQueueScript(ctx context.Context) error {
 
 // AddOrderTimeout 添加订单到超时队列
 // expireAt: 订单过期时间
-func AddOrderTimeout(ctx context.Context, orderID, userID, goodsID uint64, segmentID int, quantity int, expireAt time.Time) error {
+func AddOrderTimeout(ctx context.Context, orderID, userID, goodsID, activityID uint64, segmentID int, quantity int, expireAt time.Time) error {
 	item := OrderTimeoutItem{
-		OrderID:   orderID,
-		UserID:    userID,
-		GoodsID:   goodsID,
-		SegmentID: segmentID,
-		Quantity:  quantity,
+		OrderID:    orderID,
+		UserID:     userID,
+		GoodsID:    goodsID,
+		ActivityID: activityID,
+		SegmentID:  segmentID,
+		Quantity:   quantity,
 	}
 	data, err := json.Marshal(item)
 	if err != nil {

@@ -5,25 +5,36 @@
         <div class="auth-copy">
           <span class="admin-badge">Admin</span>
           <h1 class="auth-title">后台管理</h1>
-          <p class="auth-desc">这是独立于秒杀前台的管理站点入口，输入管理密钥后进入后台。</p>
+          <p class="auth-desc">使用管理员账号登录，进入商品、订单、用户和运行监控管理台。</p>
         </div>
 
         <div v-if="authError" class="alert alert-error">{{ authError }}</div>
 
-        <form class="auth-form" @submit.prevent="handleAdminLogin">
+        <form class="auth-form" autocomplete="off" @submit.prevent="handleAdminLogin">
           <div class="form-group">
-            <label class="form-label" for="admin-secret">管理密钥</label>
+            <label class="form-label" for="admin-username">管理员账号</label>
             <input
-              id="admin-secret"
-              v-model="secretInput"
+              id="admin-username"
+              v-model="adminLoginForm.username"
+              type="text"
+              class="form-input"
+              placeholder="请输入管理员账号"
+              autocomplete="off"
+            />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="admin-password">密码</label>
+            <input
+              id="admin-password"
+              v-model="adminLoginForm.password"
               type="password"
               class="form-input"
-              placeholder="请输入 X-Admin-Secret"
-              autocomplete="current-password"
+              placeholder="请输入密码"
+              autocomplete="new-password"
             />
           </div>
           <button type="submit" class="btn btn-primary btn-block" :disabled="authLoading">
-            {{ authLoading ? '验证中...' : '进入后台' }}
+            {{ authLoading ? '登录中...' : '登录后台' }}
           </button>
         </form>
       </section>
@@ -156,6 +167,124 @@
             </div>
           </div>
         </div>
+        <div class="panel">
+          <div class="panel-header">
+            <h2>商品活动配置</h2>
+            <button class="btn btn-primary" @click="prepareCreateActivity">新增活动</button>
+          </div>
+
+          <div class="toolbar">
+            <input v-model="activityFilters.keyword" class="form-input toolbar-input" placeholder="搜索活动或商品" />
+            <select v-model="activityFilters.status" class="form-input toolbar-select">
+              <option value="">全部状态</option>
+              <option value="0">未开始</option>
+              <option value="1">进行中</option>
+              <option value="2">已结束</option>
+              <option value="3">停用</option>
+            </select>
+            <button class="btn btn-secondary" @click="handleActivitySearch">查询</button>
+            <button class="btn btn-secondary" @click="resetActivityFilters">重置</button>
+          </div>
+
+          <form class="goods-form-card" @submit.prevent="submitActivityForm">
+            <div class="panel-header slim">
+              <h3>{{ activityForm.id ? '编辑活动' : '新增活动' }}</h3>
+              <button v-if="activityForm.id" type="button" class="btn btn-secondary" @click="resetActivityForm">取消编辑</button>
+            </div>
+            <div class="goods-form-grid">
+              <div class="form-group">
+                <label class="form-label">商品 ID</label>
+                <input v-model.number="activityForm.goodsId" type="number" min="1" step="1" class="form-input" placeholder="请输入商品 ID" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">限购数量</label>
+                <input v-model.number="activityForm.maxBuyLimit" type="number" min="1" step="1" class="form-input" placeholder="1" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">开始时间</label>
+                <input v-model="activityForm.startTime" type="datetime-local" class="form-input" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">结束时间</label>
+                <input v-model="activityForm.endTime" type="datetime-local" class="form-input" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">状态</label>
+                <select v-model.number="activityForm.status" class="form-input">
+                  <option :value="0">未开始</option>
+                  <option :value="1">进行中</option>
+                  <option :value="2">已结束</option>
+                  <option :value="3">停用</option>
+                </select>
+              </div>
+              <div class="form-group form-group-full">
+                <label class="form-label">活动标题</label>
+                <input v-model="activityForm.title" class="form-input" maxlength="255" placeholder="请输入活动标题" />
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary" :disabled="savingActivity">
+              {{ savingActivity ? '保存中...' : (activityForm.id ? '保存修改' : '创建活动') }}
+            </button>
+          </form>
+
+          <div class="table-shell">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>活动</th>
+                  <th>商品</th>
+                  <th>时间</th>
+                  <th>限购</th>
+                  <th>状态</th>
+                  <th>预热</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="activity in activities" :key="activity.id">
+                  <td>{{ activity.id }}</td>
+                  <td>
+                    <div class="table-title">{{ activity.title }}</div>
+                    <div class="table-subtitle">{{ activity.isDefault === 1 ? '默认活动' : '自定义活动' }}</div>
+                  </td>
+                  <td>
+                    <div class="table-title">{{ activity.goodsName }}</div>
+                    <div class="table-subtitle">商品 ID {{ activity.goodsId }} · {{ formatCurrency(activity.goodsPrice) }}</div>
+                  </td>
+                  <td>
+                    <div class="table-title">{{ formatTime(activity.startTime) }}</div>
+                    <div class="table-subtitle">{{ formatTime(activity.endTime) }}</div>
+                  </td>
+                  <td>{{ activity.maxBuyLimit }}</td>
+                  <td><span :class="['status-badge', activityStatusClass(activity.status)]">{{ activityStatusText(activity.status) }}</span></td>
+                  <td><span :class="['status-badge', activity.warmupStatus === 1 ? 'status-on' : 'status-pending']">{{ warmupStatusText(activity.warmupStatus) }}</span></td>
+                  <td>
+                    <div class="action-row">
+                      <button class="text-button" @click="editActivity(activity)">编辑</button>
+                      <button class="text-button" @click="handleWarmUpActivity(activity.id)" :disabled="warmingActivity === activity.id">
+                        {{ warmingActivity === activity.id ? '预热中' : '预热' }}
+                      </button>
+                      <button v-if="activity.status !== 3" class="text-button danger" @click="changeActivityStatus(activity, 3)">停用</button>
+                      <button v-else class="text-button" @click="changeActivityStatus(activity, 1)">启用</button>
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="activities.length === 0">
+                  <td colspan="8" class="table-empty">暂无活动数据</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pager" v-if="pagination.activities.total > 0">
+            <span>第 {{ pagination.activities.page }} / {{ totalPages('activities') }} 页，共 {{ pagination.activities.total }} 条</span>
+            <div class="pager-actions">
+              <button class="btn btn-secondary" :disabled="pagination.activities.page <= 1 || loadingState.activities" @click="changePage('activities', pagination.activities.page - 1)">上一页</button>
+              <button class="btn btn-secondary" :disabled="pagination.activities.page >= totalPages('activities') || loadingState.activities" @click="changePage('activities', pagination.activities.page + 1)">下一页</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section v-if="activeTab === 'orders'" class="admin-section">
@@ -183,6 +312,7 @@
                   <th>订单号</th>
                   <th>用户</th>
                   <th>商品</th>
+                  <th>活动</th>
                   <th>数量</th>
                   <th>金额</th>
                   <th>状态</th>
@@ -195,6 +325,7 @@
                   <td>{{ order.id }}</td>
                   <td>{{ order.username }}</td>
                   <td>{{ order.goodsName }}</td>
+                  <td>{{ order.activityTitle || '-' }}</td>
                   <td>{{ order.quantity }}</td>
                   <td>{{ formatCurrency(order.payAmount) }}</td>
                   <td><span :class="['status-badge', orderStatusClass(order.status)]">{{ orderStatusText(order.status) }}</span></td>
@@ -202,7 +333,7 @@
                   <td><button class="text-button" @click="fetchOrderDetail(order.id)">详情</button></td>
                 </tr>
                 <tr v-if="orders.length === 0">
-                  <td colspan="8" class="table-empty">暂无订单数据</td>
+                  <td colspan="9" class="table-empty">暂无订单数据</td>
                 </tr>
               </tbody>
             </table>
@@ -225,6 +356,8 @@
               <div><span>订单号</span><strong>{{ selectedOrder.id }}</strong></div>
               <div><span>用户</span><strong>{{ selectedOrder.username }}</strong></div>
               <div><span>商品</span><strong>{{ selectedOrder.goodsName }}</strong></div>
+              <div><span>活动</span><strong>{{ selectedOrder.activityTitle || '-' }}</strong></div>
+              <div><span>活动 ID</span><strong>{{ selectedOrder.activityId || '-' }}</strong></div>
               <div><span>状态</span><strong>{{ orderStatusText(selectedOrder.status) }}</strong></div>
               <div><span>数量</span><strong>{{ selectedOrder.quantity }}</strong></div>
               <div><span>金额</span><strong>{{ formatCurrency(selectedOrder.payAmount) }}</strong></div>
@@ -526,14 +659,14 @@
 
         <article class="panel">
           <div class="panel-header">
-            <h2>Redis 商品运行态</h2>
-            <span class="panel-note">看分段库存、已购与已处理数量是否对齐。</span>
+            <h2>Redis 活动运行态</h2>
+            <span class="panel-note">看活动分段库存、已购与已处理数量是否对齐。</span>
           </div>
           <div class="table-shell">
             <table class="admin-table">
               <thead>
                 <tr>
-                  <th>商品</th>
+                  <th>活动 / 商品</th>
                   <th>状态</th>
                   <th>总库存</th>
                   <th>已购</th>
@@ -545,8 +678,8 @@
               <tbody>
                 <tr v-for="item in observability.redis.goods" :key="item.goodsId">
                   <td>
-                    <div class="table-title">{{ item.goodsName }}</div>
-                    <div class="table-subtitle">ID {{ item.goodsId }}</div>
+                    <div class="table-title">{{ item.activityTitle || item.goodsName }}</div>
+                    <div class="table-subtitle">活动 ID {{ item.activityId || '-' }} · 商品 ID {{ item.goodsId }}</div>
                   </td>
                   <td>
                     <span :class="['status-badge', item.onSale ? 'status-on' : 'status-off']">
@@ -656,7 +789,7 @@
             <div class="panel-header">
               <h2>全量预热</h2>
             </div>
-            <p class="warmup-desc">将所有商品的 MySQL 库存重新同步到 Redis，适合启动后或批量修改库存后执行。</p>
+            <p class="warmup-desc">将所有启用活动的 MySQL 商品库存重新同步到 Redis，适合启动后或批量修改库存后执行。</p>
             <button class="btn btn-primary" @click="handleWarmUpAll" :disabled="warmingAll">
               {{ warmingAll ? '预热中...' : '执行全量预热' }}
             </button>
@@ -685,8 +818,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
+  adminCreateActivity,
   adminCreateGoods,
   adminDeleteGoods,
+  adminGetActivities,
   adminGetGoods,
   adminGetObservability,
   adminGetOrderDetail,
@@ -694,15 +829,20 @@ import {
   adminRebuildStats,
   adminGetStats,
   adminGetUsers,
+  adminLogin,
   adminPing,
   adminUpdateGoods,
+  adminUpdateActivity,
+  adminUpdateActivityStatus,
   adminUpdateUserStatus,
+  adminWarmUpActivity,
   adminWarmUpAll,
   adminWarmUpGoods
 } from '../api'
 import Toast from '../components/Toast.vue'
 
-const ADMIN_SECRET_KEY = 'admin_secret'
+const ADMIN_TOKEN_KEY = 'admin_token'
+const ADMIN_USERNAME_KEY = 'admin_username'
 
 const toast = ref(null)
 const tabs = [
@@ -714,8 +854,11 @@ const tabs = [
   { key: 'warmup', label: '库存预热' }
 ]
 
-const secretInput = ref(localStorage.getItem(ADMIN_SECRET_KEY) || '')
-const adminSecret = ref(localStorage.getItem(ADMIN_SECRET_KEY) || '')
+const adminLoginForm = reactive({
+  username: localStorage.getItem(ADMIN_USERNAME_KEY) || '',
+  password: ''
+})
+const adminToken = ref(localStorage.getItem(ADMIN_TOKEN_KEY) || '')
 const verified = ref(false)
 const authLoading = ref(false)
 const authError = ref('')
@@ -724,6 +867,7 @@ const activeTab = ref('goods')
 const loadingState = reactive({
   stats: false,
   observability: false,
+  activities: false,
   goods: false,
   orders: false,
   users: false
@@ -732,25 +876,30 @@ const loadingState = reactive({
 const loadedTabs = reactive({
   stats: false,
   observability: false,
+  activities: false,
   goods: false,
   orders: false,
   users: false
 })
 
 const pagination = reactive({
+  activities: { page: 1, pageSize: 20, total: 0 },
   goods: { page: 1, pageSize: 20, total: 0 },
   orders: { page: 1, pageSize: 20, total: 0 },
   users: { page: 1, pageSize: 20, total: 0 }
 })
 
 const goodsList = ref([])
+const activities = ref([])
 const orders = ref([])
 const users = ref([])
 const selectedOrder = ref(null)
 const savingGoods = ref(false)
+const savingActivity = ref(false)
 const rebuildingStats = ref(false)
 const warmingAll = ref(false)
 const warmingSingle = ref(false)
+const warmingActivity = ref(null)
 const warmupGoodsId = ref('')
 
 const stats = reactive({
@@ -842,6 +991,11 @@ const goodsFilters = reactive({
   status: ''
 })
 
+const activityFilters = reactive({
+  keyword: '',
+  status: ''
+})
+
 const orderFilters = reactive({
   keyword: '',
   status: ''
@@ -867,7 +1021,22 @@ const goodsForm = reactive({
   status: 1
 })
 
-const tabLoading = computed(() => loadingState[activeTab.value] || false)
+const activityForm = reactive({
+  id: null,
+  goodsId: '',
+  title: '',
+  startTime: '',
+  endTime: '',
+  status: 1,
+  maxBuyLimit: 1
+})
+
+const tabLoading = computed(() => {
+  if (activeTab.value === 'goods') {
+    return loadingState.goods || loadingState.activities
+  }
+  return loadingState[activeTab.value] || false
+})
 
 const showToast = (message, type = 'info') => {
   toast.value?.show(message, type)
@@ -884,12 +1053,30 @@ const normalizeGoods = items => (items || []).map(item => ({
   updatedAt: item.UpdatedAt
 }))
 
+const normalizeActivities = items => (items || []).map(item => ({
+  id: Number(item.id || 0),
+  goodsId: Number(item.goods_id || 0),
+  title: item.title || '',
+  startTime: item.start_time,
+  endTime: item.end_time,
+  status: Number(item.status || 0),
+  maxBuyLimit: Number(item.max_buy_limit || 0),
+  warmupStatus: Number(item.warmup_status || 0),
+  isDefault: Number(item.is_default || 0),
+  goodsName: item.goods_name || '-',
+  goodsPrice: Number(item.goods_price || 0),
+  goodsStatus: Number(item.goods_status || 0),
+  goodsStock: Number(item.goods_stock || 0)
+}))
+
 const normalizeOrders = items => (items || []).map(item => ({
   id: item.ID,
   userId: item.UserID,
   username: item.username,
   goodsId: item.GoodsID,
+  activityId: item.ActivityID,
   goodsName: item.goods_name,
+  activityTitle: item.activity_title,
   quantity: Number(item.Quantity || 0),
   payAmount: Number(item.PayAmount || 0),
   status: Number(item.Status || 0),
@@ -965,7 +1152,9 @@ const applyObservability = payload => {
     })),
     goods: (next.redis?.goods || []).map(item => ({
       goodsId: Number(item.goods_id || 0),
+      activityId: Number(item.activity_id || 0),
       goodsName: item.goods_name,
+      activityTitle: item.activity_title || '',
       onSale: Boolean(item.on_sale),
       totalStock: Number(item.total_stock || 0),
       boughtUsers: Number(item.bought_users || 0),
@@ -1029,6 +1218,9 @@ const formatTime = value => {
 }
 
 const goodsStatusText = status => (status === 1 ? '上架' : '下架')
+const activityStatusText = status => ({ 0: '未开始', 1: '进行中', 2: '已结束', 3: '停用' }[status] || '未知')
+const activityStatusClass = status => ({ 0: 'status-pending', 1: 'status-on', 2: 'status-off', 3: 'status-off' }[status] || 'status-off')
+const warmupStatusText = status => (status === 1 ? '已预热' : '未预热')
 const orderStatusText = status => ({ 0: '待支付', 1: '已支付', 2: '已取消' }[status] || '未知')
 const orderStatusClass = status => ({ 0: 'status-pending', 1: 'status-on', 2: 'status-off' }[status] || 'status-off')
 const userStatusText = status => (status === 1 ? '启用' : '禁用')
@@ -1103,13 +1295,30 @@ const buildListParams = (filters, pager) => {
   return params
 }
 
+const toDateTimeLocal = value => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hour}:${minute}`
+}
+
+const fromDateTimeLocal = value => {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString()
+}
+
 const markStatsDirty = () => {
   loadedTabs.stats = false
 }
 
 const handleAdminError = (error, fallbackMessage) => {
-  if (error.response?.status === 403) {
-    authError.value = '管理密钥无效，请重新输入'
+  if (error.response?.status === 401 || error.response?.status === 403) {
+    authError.value = '后台登录已失效，请重新登录'
     logoutAdmin(false)
     return
   }
@@ -1119,7 +1328,7 @@ const handleAdminError = (error, fallbackMessage) => {
 const fetchStats = async () => {
   loadingState.stats = true
   try {
-    const res = await adminGetStats(adminSecret.value)
+    const res = await adminGetStats(adminToken.value)
     if (res.data.code === 0) {
       applyStats(res.data.data)
       loadedTabs.stats = true
@@ -1136,7 +1345,7 @@ const fetchStats = async () => {
 const fetchObservability = async () => {
   loadingState.observability = true
   try {
-    const res = await adminGetObservability(adminSecret.value)
+    const res = await adminGetObservability(adminToken.value)
     if (res.data.code === 0) {
       applyObservability(res.data.data)
       loadedTabs.observability = true
@@ -1153,7 +1362,7 @@ const fetchObservability = async () => {
 const handleRebuildStats = async () => {
   rebuildingStats.value = true
   try {
-    const res = await adminRebuildStats(adminSecret.value)
+    const res = await adminRebuildStats(adminToken.value)
     if (res.data.code === 0) {
       applyStats(res.data.data)
       loadedTabs.stats = true
@@ -1172,7 +1381,7 @@ const fetchGoods = async (page = pagination.goods.page) => {
   loadingState.goods = true
   pagination.goods.page = page
   try {
-    const res = await adminGetGoods(adminSecret.value, buildListParams(goodsFilters, pagination.goods))
+    const res = await adminGetGoods(adminToken.value, buildListParams(goodsFilters, pagination.goods))
     if (res.data.code === 0) {
       const payload = res.data.data || {}
       goodsList.value = normalizeGoods(payload.items)
@@ -1189,11 +1398,32 @@ const fetchGoods = async (page = pagination.goods.page) => {
   }
 }
 
+const fetchActivities = async (page = pagination.activities.page) => {
+  loadingState.activities = true
+  pagination.activities.page = page
+  try {
+    const res = await adminGetActivities(adminToken.value, buildListParams(activityFilters, pagination.activities))
+    if (res.data.code === 0) {
+      const payload = res.data.data || {}
+      activities.value = normalizeActivities(payload.items)
+      pagination.activities.total = Number(payload.total || 0)
+      pagination.activities.page = Number(payload.page || page)
+      loadedTabs.activities = true
+    } else {
+      showToast(res.data.msg || '获取活动列表失败', 'error')
+    }
+  } catch (error) {
+    handleAdminError(error, '获取活动列表失败')
+  } finally {
+    loadingState.activities = false
+  }
+}
+
 const fetchOrders = async (page = pagination.orders.page) => {
   loadingState.orders = true
   pagination.orders.page = page
   try {
-    const res = await adminGetOrders(adminSecret.value, buildListParams(orderFilters, pagination.orders))
+    const res = await adminGetOrders(adminToken.value, buildListParams(orderFilters, pagination.orders))
     if (res.data.code === 0) {
       const payload = res.data.data || {}
       orders.value = normalizeOrders(payload.items)
@@ -1214,7 +1444,7 @@ const fetchUsers = async (page = pagination.users.page) => {
   loadingState.users = true
   pagination.users.page = page
   try {
-    const res = await adminGetUsers(adminSecret.value, buildListParams(userFilters, pagination.users))
+    const res = await adminGetUsers(adminToken.value, buildListParams(userFilters, pagination.users))
     if (res.data.code === 0) {
       const payload = res.data.data || {}
       users.value = normalizeUsers(payload.items)
@@ -1233,7 +1463,7 @@ const fetchUsers = async (page = pagination.users.page) => {
 
 const fetchOrderDetail = async orderId => {
   try {
-    const res = await adminGetOrderDetail(adminSecret.value, orderId)
+    const res = await adminGetOrderDetail(adminToken.value, orderId)
     if (res.data.code === 0) {
       selectedOrder.value = normalizeOrders([res.data.data])[0] || null
     } else {
@@ -1246,11 +1476,16 @@ const fetchOrderDetail = async orderId => {
 
 const ensureTabLoaded = async (tab, force = false) => {
   if (!verified.value) return
-  if (!force && loadedTabs[tab]) return
+  if (tab === 'goods' && !force && loadedTabs.goods && loadedTabs.activities) return
+  if (tab !== 'goods' && !force && loadedTabs[tab]) return
 
   switch (tab) {
     case 'goods':
       await fetchGoods(force ? 1 : pagination.goods.page)
+      await fetchActivities(force ? 1 : pagination.activities.page)
+      break
+    case 'activities':
+      await fetchActivities(force ? 1 : pagination.activities.page)
       break
     case 'orders':
       await fetchOrders(force ? 1 : pagination.orders.page)
@@ -1275,6 +1510,9 @@ const changePage = async (tab, nextPage) => {
   switch (tab) {
     case 'goods':
       await fetchGoods(nextPage)
+      break
+    case 'activities':
+      await fetchActivities(nextPage)
       break
     case 'orders':
       await fetchOrders(nextPage)
@@ -1330,8 +1568,8 @@ const submitGoodsForm = async () => {
   savingGoods.value = true
   try {
     const res = goodsForm.id
-      ? await adminUpdateGoods(adminSecret.value, goodsForm.id, payload)
-      : await adminCreateGoods(adminSecret.value, payload)
+      ? await adminUpdateGoods(adminToken.value, goodsForm.id, payload)
+      : await adminCreateGoods(adminToken.value, payload)
 
     if (res.data.code === 0) {
       showToast(goodsForm.id ? '商品已更新' : '商品已创建', 'success')
@@ -1351,7 +1589,7 @@ const submitGoodsForm = async () => {
 const removeGoods = async goods => {
   if (!window.confirm(`确认删除商品“${goods.productName}”吗？`)) return
   try {
-    const res = await adminDeleteGoods(adminSecret.value, goods.id)
+    const res = await adminDeleteGoods(adminToken.value, goods.id)
     if (res.data.code === 0) {
       showToast('商品已删除', 'success')
       markStatsDirty()
@@ -1364,10 +1602,108 @@ const removeGoods = async goods => {
   }
 }
 
+const resetActivityForm = () => {
+  activityForm.id = null
+  activityForm.goodsId = ''
+  activityForm.title = ''
+  activityForm.startTime = ''
+  activityForm.endTime = ''
+  activityForm.status = 1
+  activityForm.maxBuyLimit = 1
+}
+
+const prepareCreateActivity = () => {
+  resetActivityForm()
+}
+
+const editActivity = activity => {
+  activityForm.id = activity.id
+  activityForm.goodsId = activity.goodsId
+  activityForm.title = activity.title
+  activityForm.startTime = toDateTimeLocal(activity.startTime)
+  activityForm.endTime = toDateTimeLocal(activity.endTime)
+  activityForm.status = activity.status
+  activityForm.maxBuyLimit = activity.maxBuyLimit
+}
+
+const submitActivityForm = async () => {
+  if (!activityForm.goodsId || !activityForm.title.trim()) {
+    showToast('请输入商品 ID 和活动标题', 'error')
+    return
+  }
+  if (!activityForm.startTime || !activityForm.endTime || new Date(activityForm.endTime) <= new Date(activityForm.startTime)) {
+    showToast('活动时间无效', 'error')
+    return
+  }
+  if (activityForm.maxBuyLimit < 1) {
+    showToast('限购数量必须大于 0', 'error')
+    return
+  }
+
+  const payload = {
+    goods_id: Number(activityForm.goodsId),
+    title: activityForm.title.trim(),
+    start_time: fromDateTimeLocal(activityForm.startTime),
+    end_time: fromDateTimeLocal(activityForm.endTime),
+    status: Number(activityForm.status),
+    max_buy_limit: Number(activityForm.maxBuyLimit)
+  }
+
+  savingActivity.value = true
+  try {
+    const res = activityForm.id
+      ? await adminUpdateActivity(adminToken.value, activityForm.id, payload)
+      : await adminCreateActivity(adminToken.value, payload)
+
+    if (res.data.code === 0) {
+      showToast(activityForm.id ? '活动已更新' : '活动已创建', 'success')
+      resetActivityForm()
+      await fetchActivities(1)
+    } else {
+      showToast(res.data.msg || '保存活动失败', 'error')
+    }
+  } catch (error) {
+    handleAdminError(error, '保存活动失败')
+  } finally {
+    savingActivity.value = false
+  }
+}
+
+const handleWarmUpActivity = async activityId => {
+  warmingActivity.value = activityId
+  try {
+    const res = await adminWarmUpActivity(adminToken.value, activityId)
+    if (res.data.code === 0) {
+      showToast(`活动 ${activityId} 预热完成`, 'success')
+      await fetchActivities(pagination.activities.page)
+    } else {
+      showToast(res.data.msg || '活动预热失败', 'error')
+    }
+  } catch (error) {
+    handleAdminError(error, '活动预热失败')
+  } finally {
+    warmingActivity.value = null
+  }
+}
+
+const changeActivityStatus = async (activity, status) => {
+  try {
+    const res = await adminUpdateActivityStatus(adminToken.value, activity.id, status)
+    if (res.data.code === 0) {
+      showToast('活动状态已更新', 'success')
+      await fetchActivities(pagination.activities.page)
+    } else {
+      showToast(res.data.msg || '更新活动状态失败', 'error')
+    }
+  } catch (error) {
+    handleAdminError(error, '更新活动状态失败')
+  }
+}
+
 const handleWarmUpSingle = async goodsId => {
   warmingSingle.value = true
   try {
-    const res = await adminWarmUpGoods(adminSecret.value, goodsId)
+    const res = await adminWarmUpGoods(adminToken.value, goodsId)
     if (res.data.code === 0) {
       showToast(`商品 ${goodsId} 预热完成`, 'success')
     } else {
@@ -1392,11 +1728,14 @@ const handleManualWarmUp = async () => {
 const handleWarmUpAll = async () => {
   warmingAll.value = true
   try {
-    const res = await adminWarmUpAll(adminSecret.value)
+    const res = await adminWarmUpAll(adminToken.value)
     if (res.data.code === 0) {
-      showToast(`全量预热完成，共处理 ${res.data.data.count} 个商品`, 'success')
+      showToast(`全量预热完成，共处理 ${res.data.data.count} 个活动`, 'success')
       if (loadedTabs.goods) {
         await fetchGoods(pagination.goods.page)
+      }
+      if (loadedTabs.activities) {
+        await fetchActivities(pagination.activities.page)
       }
     } else {
       showToast(res.data.msg || '全量预热失败', 'error')
@@ -1411,7 +1750,7 @@ const handleWarmUpAll = async () => {
 const toggleUserStatus = async user => {
   const nextStatus = user.status === 1 ? 0 : 1
   try {
-    const res = await adminUpdateUserStatus(adminSecret.value, user.id, nextStatus)
+    const res = await adminUpdateUserStatus(adminToken.value, user.id, nextStatus)
     if (res.data.code === 0) {
       showToast(`用户已${nextStatus === 1 ? '启用' : '禁用'}`, 'success')
       markStatsDirty()
@@ -1430,6 +1769,10 @@ const refreshCurrentTab = async () => {
 
 const handleGoodsSearch = async () => {
   await fetchGoods(1)
+}
+
+const handleActivitySearch = async () => {
+  await fetchActivities(1)
 }
 
 const handleOrderSearch = async () => {
@@ -1453,6 +1796,12 @@ const resetGoodsFilters = async () => {
   await fetchGoods(1)
 }
 
+const resetActivityFilters = async () => {
+  activityFilters.keyword = ''
+  activityFilters.status = ''
+  await fetchActivities(1)
+}
+
 const resetOrderFilters = async () => {
   orderFilters.keyword = ''
   orderFilters.status = ''
@@ -1467,27 +1816,30 @@ const resetUserFilters = async () => {
 }
 
 const handleAdminLogin = async () => {
-  const secret = secretInput.value.trim()
-  if (!secret) {
-    authError.value = '请输入管理密钥'
+  const username = adminLoginForm.username.trim()
+  const password = adminLoginForm.password
+  if (!username || !password) {
+    authError.value = '请输入管理员账号和密码'
     return
   }
 
   authLoading.value = true
   authError.value = ''
   try {
-    const res = await adminPing(secret)
+    const res = await adminLogin(username, password)
     if (res.data.code === 0) {
-      adminSecret.value = secret
+      adminToken.value = res.data.data.token
       verified.value = true
-      localStorage.setItem(ADMIN_SECRET_KEY, secret)
+      adminLoginForm.password = ''
+      localStorage.setItem(ADMIN_TOKEN_KEY, adminToken.value)
+      localStorage.setItem(ADMIN_USERNAME_KEY, username)
       await ensureTabLoaded(activeTab.value, true)
       showToast('已进入后台管理', 'success')
     } else {
-      authError.value = res.data.msg || '验证失败'
+      authError.value = res.data.msg || '登录失败'
     }
   } catch (error) {
-    authError.value = error.response?.data?.msg || '验证失败'
+    authError.value = error.response?.data?.msg || '登录失败'
   } finally {
     authLoading.value = false
   }
@@ -1495,12 +1847,13 @@ const handleAdminLogin = async () => {
 
 const logoutAdmin = (notify = true) => {
   verified.value = false
-  adminSecret.value = ''
-  localStorage.removeItem(ADMIN_SECRET_KEY)
-  secretInput.value = ''
+  adminToken.value = ''
+  localStorage.removeItem(ADMIN_TOKEN_KEY)
+  adminLoginForm.password = ''
   authError.value = ''
   loadedTabs.stats = false
   loadedTabs.observability = false
+  loadedTabs.activities = false
   loadedTabs.goods = false
   loadedTabs.orders = false
   loadedTabs.users = false
@@ -1516,13 +1869,12 @@ watch(activeTab, async tab => {
 })
 
 onMounted(async () => {
-  if (!adminSecret.value) return
+  if (!adminToken.value) return
 
   try {
-    const res = await adminPing(adminSecret.value)
+    const res = await adminPing(adminToken.value)
     if (res.data.code === 0) {
       verified.value = true
-      secretInput.value = adminSecret.value
       await ensureTabLoaded(activeTab.value, true)
     } else {
       logoutAdmin(false)
@@ -1570,6 +1922,7 @@ onMounted(async () => {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
+  width: fit-content;
   padding: 0 12px;
   border-radius: 999px;
   background: var(--accent-soft);

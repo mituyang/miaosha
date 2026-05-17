@@ -141,6 +141,9 @@ onMounted(() => {
 }
 
 .captcha-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 132px;
   height: 44px;
   border: 1px solid rgba(92, 68, 42, 0.18);
@@ -149,6 +152,9 @@ onMounted(() => {
   padding: 0;
   overflow: hidden;
   cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .captcha-button:disabled {
@@ -159,5 +165,17 @@ onMounted(() => {
   display: block;
   width: 132px;
   height: 44px;
+  object-fit: contain;
+}
+
+@media (max-width: 420px) {
+  .captcha-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .captcha-button,
+  .captcha-image {
+    width: 100%;
+  }
 }
 </style>

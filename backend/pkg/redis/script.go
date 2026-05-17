@@ -106,6 +106,7 @@ const (
 	SeckillSuccess     SeckillResult = 1  // 成功
 	SeckillSoldOut     SeckillResult = 0  // 库存不足
 	SeckillLimitExceed SeckillResult = -1 // 超过限购数量
+	SeckillNotOnSale   SeckillResult = -2 // 活动不可抢购
 	SeckillScriptError SeckillResult = -99
 )
 
@@ -154,18 +155,19 @@ func RollbackStock(ctx context.Context, goodsID uint64, segmentID int, userID ui
 // CheckAndMark 检查用户资格、标记用户、扣减库存（原子操作）
 // Redis 扣库存成功 = 秒杀成功
 // 返回: SeckillResult, 扣减的分段索引
-func CheckAndMark(ctx context.Context, goodsID, userID uint64, quantity, maxBuyLimit int) (SeckillResult, int, error) {
+func CheckAndMark(ctx context.Context, activityID, userID uint64, quantity int, requestTimeMs int64) (SeckillResult, int, error) {
 	// 构建分段 keys
-	keys := make([]string, SegmentCount+1)
+	keys := make([]string, SegmentCount+2)
+	keys[0] = ActivityMetaKey(activityID)
 	for i := range SegmentCount {
-		keys[i] = SegmentStockKey(goodsID, i)
+		keys[i+1] = SegmentStockKey(activityID, i)
 	}
-	keys[SegmentCount] = BoughtKey(goodsID)
+	keys[SegmentCount+1] = BoughtKey(activityID)
 
 	// 随机起始分段，分散压力
 	startIdx := rand.Intn(SegmentCount)
 
-	result, err := evalShaIntWithRetry(ctx, seckillCheckSHA, keys, userID, SegmentCount, startIdx, quantity, maxBuyLimit)
+	result, err := evalShaIntWithRetry(ctx, seckillCheckSHA, keys, userID, SegmentCount, startIdx, quantity, requestTimeMs)
 	if err != nil {
 		return SeckillScriptError, 0, err
 	}
@@ -178,9 +180,9 @@ func CheckAndMark(ctx context.Context, goodsID, userID uint64, quantity, maxBuyL
 
 // CheckProcessed Consumer 端幂等检查（库存已在 API 层扣减）
 // 返回: 1=成功可创建订单, -1=用户未标记, -2=已处理过
-func CheckProcessed(ctx context.Context, goodsID, userID uint64, quantity int) (int, error) {
-	boughtKey := BoughtKey(goodsID)
-	processedKey := ProcessedKey(goodsID)
+func CheckProcessed(ctx context.Context, activityID, userID uint64, quantity int) (int, error) {
+	boughtKey := BoughtKey(activityID)
+	processedKey := ProcessedKey(activityID)
 
 	result, err := evalShaIntWithRetry(ctx, seckillDecrSHA, []string{boughtKey, processedKey}, userID, quantity)
 	if err != nil {
@@ -190,8 +192,8 @@ func CheckProcessed(ctx context.Context, goodsID, userID uint64, quantity int) (
 }
 
 // ClearUserMark 清除用户标记（MQ 发送失败时调用，减少已购数量）
-func ClearUserMark(ctx context.Context, goodsID, userID uint64, quantity int) error {
-	boughtKey := BoughtKey(goodsID)
+func ClearUserMark(ctx context.Context, activityID, userID uint64, quantity int) error {
+	boughtKey := BoughtKey(activityID)
 	field := fmt.Sprintf("%d", userID)
 	val, err := Client.HIncrBy(ctx, boughtKey, field, int64(-quantity)).Result()
 	if err != nil {
@@ -206,8 +208,8 @@ func ClearUserMark(ctx context.Context, goodsID, userID uint64, quantity int) er
 
 // SetUserStatus 设置用户订单状态
 // status: 0=待支付, 1=已支付, 2=已取消
-func SetUserStatus(ctx context.Context, goodsID, userID uint64, status int) error {
-	boughtKey := BoughtKey(goodsID)
+func SetUserStatus(ctx context.Context, activityID, userID uint64, status int) error {
+	boughtKey := BoughtKey(activityID)
 	return Client.HSet(ctx, boughtKey, fmt.Sprintf("%d", userID), status).Err()
 }
 
@@ -218,8 +220,8 @@ func ClearUserDeducted(ctx context.Context, goodsID, userID uint64) error {
 }
 
 // ClearProcessed 清除用户已处理标记（允许重试，减少已处理数量）
-func ClearProcessed(ctx context.Context, goodsID, userID uint64, quantity int) error {
-	processedKey := ProcessedKey(goodsID)
+func ClearProcessed(ctx context.Context, activityID, userID uint64, quantity int) error {
+	processedKey := ProcessedKey(activityID)
 	field := fmt.Sprintf("%d", userID)
 	val, err := Client.HIncrBy(ctx, processedKey, field, int64(-quantity)).Result()
 	if err != nil {
@@ -240,13 +242,13 @@ type BatchCheckItem struct {
 
 // CheckProcessedBatch 批量幂等检查（使用 Pipeline）
 // 返回: map[userID]result, 1=成功, -1=未标记, -2=已处理
-func CheckProcessedBatch(ctx context.Context, goodsID uint64, items []BatchCheckItem) (map[uint64]int, error) {
+func CheckProcessedBatch(ctx context.Context, activityID uint64, items []BatchCheckItem) (map[uint64]int, error) {
 	if len(items) == 0 {
 		return make(map[uint64]int), nil
 	}
 
-	boughtKey := BoughtKey(goodsID)
-	processedKey := ProcessedKey(goodsID)
+	boughtKey := BoughtKey(activityID)
+	processedKey := ProcessedKey(activityID)
 
 	// 执行批量脚本调用
 	execBatch := func() ([]*redisLib.Cmd, error) {
@@ -307,17 +309,22 @@ func BatchRestoreStock(ctx context.Context, items []OrderTimeoutItem) error {
 		}
 
 		// 返还分段库存
-		segmentKey := SegmentStockKey(item.GoodsID, item.SegmentID)
+		activityID := item.ActivityID
+		if activityID == 0 {
+			activityID = item.GoodsID
+		}
+
+		segmentKey := SegmentStockKey(activityID, item.SegmentID)
 		pipe.IncrBy(ctx, segmentKey, int64(quantity))
 
 		// 减少用户已购数量
-		boughtKey := BoughtKey(item.GoodsID)
+		boughtKey := BoughtKey(activityID)
 		field := fmt.Sprintf("%d", item.UserID)
 		pipe.HIncrBy(ctx, boughtKey, field, int64(-quantity))
 		boughtFields = append(boughtFields, fieldInfo{key: boughtKey, field: field})
 
 		// 减少已处理数量
-		processedKey := ProcessedKey(item.GoodsID)
+		processedKey := ProcessedKey(activityID)
 		pipe.HIncrBy(ctx, processedKey, field, int64(-quantity))
 		processedFields = append(processedFields, fieldInfo{key: processedKey, field: field})
 	}

@@ -50,37 +50,43 @@ func main() {
 	}
 	logger.Info.Println("Redis connected")
 
-	// 4. 加载延迟队列 Lua 脚本
+	// 4. 加载 Lua 脚本
+	if err := redis.LoadScript(context.Background()); err != nil {
+		logger.Error.Fatalf("load lua script failed: %v", err)
+	}
+	logger.Info.Println("Lua script loaded")
+
+	// 5. 加载延迟队列 Lua 脚本
 	if err := redis.LoadDelayQueueScript(context.Background()); err != nil {
 		logger.Error.Fatalf("load delay queue script failed: %v", err)
 	}
 	logger.Info.Println("Delay queue script loaded")
 
-	// 5. 初始化 Redis 配置
+	// 6. 初始化 Redis 配置
 	redis.SetSegmentCount(cfg.Redis.SegmentCount)
 
-	// 6. 初始化雪花算法
+	// 7. 初始化雪花算法
 	workerID := cfg.Snowflake.WorkerID
 	if workerID <= 0 {
 		workerID = 2 // Worker 默认使用 2
 	}
 	_ = util.InitSnowflakeWithEpoch(workerID, cfg.Snowflake.Epoch)
 
-	// 7. 启动 Kafka 消费者
+	// 8. 启动 Kafka 消费者
 	kafkaConsumer := worker.NewKafkaConsumer(cfg)
 	if err := kafkaConsumer.Start(); err != nil {
 		logger.Error.Fatalf("start kafka consumer failed: %v", err)
 	}
 
-	// 8. 启动 Redis 超时扫描器
+	// 9. 启动 Redis 超时扫描器
 	redisScanner := worker.NewRedisTimeoutScanner(cfg)
 	redisScanner.Start()
 
-	// 9. 启动 MySQL 兜底扫描器
+	// 10. 启动 MySQL 兜底扫描器
 	mysqlScanner := worker.NewMySQLTimeoutScanner(cfg)
 	mysqlScanner.Start()
 
-	// 10. 等待退出信号
+	// 11. 等待退出信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit

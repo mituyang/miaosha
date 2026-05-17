@@ -27,44 +27,56 @@ const (
 )
 
 type SeckillService struct {
-	cfg       *config.Config
-	goodsRepo *repository.GoodsRepository
+	cfg          *config.Config
+	goodsRepo    *repository.GoodsRepository
+	activityRepo *repository.SeckillActivityRepository
 }
 
 func NewSeckillService(cfg *config.Config) *SeckillService {
 	return &SeckillService{
-		cfg:       cfg,
-		goodsRepo: repository.NewGoodsRepository(database.DB),
+		cfg:          cfg,
+		goodsRepo:    repository.NewGoodsRepository(database.DB),
+		activityRepo: repository.NewSeckillActivityRepository(database.DB),
 	}
 }
 
 // GetMaxBuyLimit 获取最大限购数量
 func (s *SeckillService) GetMaxBuyLimit() int {
-	if s.cfg.Seckill.MaxBuyLimit > 0 {
-		return s.cfg.Seckill.MaxBuyLimit
-	}
-	return 5 // 默认值
+	return s.cfg.Seckill.MaxBuyLimit
 }
 
 // DoSeckill 秒杀核心逻辑: 检查资格 -> 发MQ -> Consumer扣库存
-func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, quantity int, requestTime time.Time) (Result, error) {
-	maxBuyLimit := s.GetMaxBuyLimit()
-
-	// 校验购买数量
-	if quantity <= 0 || quantity > maxBuyLimit {
-		return ResultError, fmt.Errorf("购买数量必须在 1-%d 之间", maxBuyLimit)
+func (s *SeckillService) DoSeckill(ctx context.Context, userID, activityID, goodsID uint64, quantity int, requestTime time.Time) (Result, error) {
+	if activityID == 0 {
+		if goodsID == 0 {
+			return ResultError, fmt.Errorf("activity_id or goods_id is required")
+		}
+		defaultActivityID, ok, err := redis.GetDefaultActivityID(ctx, goodsID)
+		if err != nil {
+			return ResultError, err
+		}
+		if !ok {
+			return ResultNotOnSale, nil
+		}
+		activityID = defaultActivityID
 	}
 
-	onSale, err := redis.IsGoodsOnSale(ctx, goodsID)
+	meta, exists, err := redis.GetActivityMeta(ctx, activityID)
 	if err != nil {
 		return ResultError, err
 	}
-	if !onSale {
+	if !exists || meta.GoodsID == 0 {
 		return ResultNotOnSale, nil
 	}
 
-	// 1. 检查用户资格并标记（扣库存）
-	result, segmentID, err := redis.CheckAndMark(ctx, goodsID, userID, quantity, maxBuyLimit)
+	if quantity <= 0 {
+		return ResultError, fmt.Errorf("购买数量必须大于 0")
+	}
+	if quantity > meta.MaxBuyLimit {
+		return ResultLimitExceed, nil
+	}
+
+	result, segmentID, err := redis.CheckAndMark(ctx, activityID, userID, quantity, requestTime.UnixMilli())
 	if err != nil {
 		return ResultError, err
 	}
@@ -78,12 +90,15 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 		return ResultSoldOut, nil
 	case redis.SeckillLimitExceed:
 		return ResultLimitExceed, nil
+	case redis.SeckillNotOnSale:
+		return ResultNotOnSale, nil
 	case redis.SeckillSuccess:
 		// 3. 发送 Kafka 消息，异步落库
 		// BornTime 改由生产者在发送时通过 kafka.Message.Time 设置
 		msg := dto.SeckillMessage{
 			UserID:      userID,
-			GoodsID:     goodsID,
+			GoodsID:     meta.GoodsID,
+			ActivityID:  activityID,
 			SegmentID:   segmentID,
 			Quantity:    quantity,
 			RequestTime: requestTime.UnixMilli(),
@@ -104,10 +119,10 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 				// Kafka 发送失败，返还库存并清除用户标记
 				rollbackCtx, rollbackCancel := context.WithTimeout(context.Background(), 3*time.Second)
 				defer rollbackCancel()
-				_ = redis.IncrSegmentStockBy(rollbackCtx, goodsID, segmentID, quantity)
-				_ = redis.ClearUserMark(rollbackCtx, goodsID, userID, quantity)
+				_ = redis.IncrSegmentStockBy(rollbackCtx, activityID, segmentID, quantity)
+				_ = redis.ClearUserMark(rollbackCtx, activityID, userID, quantity)
 				// 记录错误日志，便于排查
-				logger.Error.Printf("async send kafka failed: userID=%d, goodsID=%d, err=%v", userID, goodsID, err)
+				logger.Error.Printf("async send kafka failed: userID=%d, activityID=%d, goodsID=%d, err=%v", userID, activityID, meta.GoodsID, err)
 			}
 		}()
 
@@ -120,48 +135,86 @@ func (s *SeckillService) DoSeckill(ctx context.Context, userID, goodsID uint64, 
 
 // GetStock 获取库存
 func (s *SeckillService) GetStock(ctx context.Context, goodsID uint64) (int, error) {
-	return redis.GetStock(ctx, goodsID)
+	activityID, ok, err := redis.GetDefaultActivityID(ctx, goodsID)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, nil
+	}
+	return redis.GetStock(ctx, activityID)
 }
 
-// WarmUp 库存预热 - 将 MySQL 库存同步到 Redis（带分布式锁）
+// GetActivityStock 获取活动库存
+func (s *SeckillService) GetActivityStock(ctx context.Context, activityID uint64) (int, error) {
+	return redis.GetStock(ctx, activityID)
+}
+
+// WarmUp 默认活动库存预热 - 将 MySQL 库存同步到 Redis（带分布式锁）
 func (s *SeckillService) WarmUp(ctx context.Context, goodsID uint64) error {
+	activity, err := s.activityRepo.FindDefaultByGoodsID(goodsID)
+	if err != nil {
+		return fmt.Errorf("get default activity failed: %w", err)
+	}
+	return s.WarmUpActivity(ctx, activity.ID)
+}
+
+// WarmUpActivity 活动库存预热
+func (s *SeckillService) WarmUpActivity(ctx context.Context, activityID uint64) error {
 	// 获取分布式锁
-	acquired, err := redis.AcquireWarmupLock(ctx, goodsID)
+	acquired, err := redis.AcquireWarmupLock(ctx, activityID)
 	if err != nil {
 		return fmt.Errorf("acquire warmup lock failed: %w", err)
 	}
 	if !acquired {
-		return fmt.Errorf("warmup is already in progress for goods %d", goodsID)
+		return fmt.Errorf("warmup is already in progress for activity %d", activityID)
 	}
-	defer redis.ReleaseWarmupLock(ctx, goodsID)
+	defer redis.ReleaseWarmupLock(ctx, activityID)
 
-	goods, err := s.goodsRepo.GetByID(goodsID)
+	activity, err := s.activityRepo.GetWithGoods(activityID)
 	if err != nil {
-		return fmt.Errorf("get goods failed: %w", err)
+		return fmt.Errorf("get activity failed: %w", err)
 	}
 
 	// 清理旧数据
-	if err := redis.ClearSeckillData(ctx, goodsID); err != nil {
+	if err := redis.ClearSeckillData(ctx, activityID); err != nil {
 		return fmt.Errorf("clear old data failed: %w", err)
 	}
 
-	if err := redis.SetGoodsOnSale(ctx, goodsID, goods.Status == model.GoodsStatusOnSale); err != nil {
-		return fmt.Errorf("set goods status failed: %w", err)
+	goodsOnSale := activity.GoodsStatus == model.GoodsStatusOnSale
+	warmupStatus := model.SeckillActivityWarmupPending
+	activityEnabled := activity.Status == model.SeckillActivityStatusPending || activity.Status == model.SeckillActivityStatusRunning
+
+	if activityEnabled && goodsOnSale {
+		if err := redis.InitStock(ctx, activityID, int(activity.GoodsStock)); err != nil {
+			return fmt.Errorf("init stock failed: %w", err)
+		}
+		warmupStatus = model.SeckillActivityWarmupDone
 	}
 
-	if goods.Status != model.GoodsStatusOnSale {
-		return nil
+	if err := redis.SetActivityMeta(ctx, redis.ActivityMeta{
+		ActivityID:   activity.ID,
+		GoodsID:      activity.GoodsID,
+		Title:        activity.Title,
+		Status:       activity.Status,
+		StartTimeMs:  activity.StartTime.UnixMilli(),
+		EndTimeMs:    activity.EndTime.UnixMilli(),
+		MaxBuyLimit:  int(activity.MaxBuyLimit),
+		WarmupStatus: warmupStatus,
+		GoodsOnSale:  goodsOnSale,
+		IsDefault:    activity.IsDefault,
+	}); err != nil {
+		return fmt.Errorf("set activity meta failed: %w", err)
 	}
 
-	// 初始化库存到 Redis
-	if err := redis.InitStock(ctx, goodsID, int(goods.Stock)); err != nil {
-		return fmt.Errorf("init stock failed: %w", err)
+	if err := s.activityRepo.UpdateWarmupStatus(activityID, warmupStatus); err != nil {
+		return fmt.Errorf("update activity warmup status failed: %w", err)
 	}
 
 	return nil
 }
 
-// WarmUpAll 预热所有商品库存（带分布式锁）
+// WarmUpAll 预热所有活动库存（带分布式锁）
 func (s *SeckillService) WarmUpAll(ctx context.Context) (int, error) {
 	// 获取全量预热分布式锁
 	acquired, err := redis.AcquireWarmupAllLock(ctx)
@@ -173,28 +226,47 @@ func (s *SeckillService) WarmUpAll(ctx context.Context) (int, error) {
 	}
 	defer redis.ReleaseWarmupAllLock(ctx)
 
-	goods, err := s.goodsRepo.GetAll()
+	activities, err := s.activityRepo.ListWarmupCandidates()
 	if err != nil {
-		return 0, fmt.Errorf("get all goods failed: %w", err)
+		return 0, fmt.Errorf("get all activities failed: %w", err)
 	}
 
 	count := 0
-	for _, g := range goods {
-		if err := redis.ClearSeckillData(ctx, g.ID); err != nil {
-			continue
-		}
-		if err := redis.SetGoodsOnSale(ctx, g.ID, g.Status == model.GoodsStatusOnSale); err != nil {
-			continue
-		}
-		if g.Status != model.GoodsStatusOnSale {
-			count++
-			continue
-		}
-		if err := redis.InitStock(ctx, g.ID, int(g.Stock)); err != nil {
+	for _, activity := range activities {
+		if err := s.WarmUpActivity(ctx, activity.ID); err != nil {
+			logger.Error.Printf("warmup activity failed: activityID=%d, err=%v", activity.ID, err)
 			continue
 		}
 		count++
 	}
 
 	return count, nil
+}
+
+// RefreshActivitiesByGoods 刷新商品关联活动的 Redis 运行态
+func (s *SeckillService) RefreshActivitiesByGoods(ctx context.Context, goodsID uint64) error {
+	activities, err := s.activityRepo.ListByGoodsID(goodsID)
+	if err != nil {
+		return err
+	}
+	for _, activity := range activities {
+		if err := s.WarmUpActivity(ctx, activity.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClearActivitiesByGoods 清理商品关联活动 Redis 数据
+func (s *SeckillService) ClearActivitiesByGoods(ctx context.Context, goodsID uint64) error {
+	activities, err := s.activityRepo.ListByGoodsID(goodsID)
+	if err != nil {
+		return err
+	}
+	for _, activity := range activities {
+		if err := redis.ClearSeckillData(ctx, activity.ID); err != nil {
+			return err
+		}
+	}
+	return redis.ClearDefaultActivityID(ctx, goodsID)
 }

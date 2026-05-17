@@ -4,9 +4,8 @@
     <nav v-if="showNavbar" class="navbar">
       <router-link to="/seckill" class="nav-brand">秒杀系统</router-link>
       <div class="nav-links">
-        <router-link to="/seckill" class="nav-link">秒杀商品</router-link>
+        <router-link to="/seckill" class="nav-link">秒杀活动</router-link>
         <router-link to="/orders" class="nav-link">我的订单</router-link>
-        <a href="/admin/" class="nav-link">后台管理</a>
       </div>
       <div class="nav-user">
         <span v-if="isLoggedIn" class="username">{{ username }}</span>
@@ -22,18 +21,28 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
+const route = useRoute()
 
-const isLoggedIn = computed(() => !!localStorage.getItem('token'))
-const username = computed(() => localStorage.getItem('username') || '')
+const token = ref(localStorage.getItem('token') || '')
+const username = ref(localStorage.getItem('username') || '')
+const isLoggedIn = computed(() => !!token.value)
 const showNavbar = computed(() => isLoggedIn.value)
+
+const syncAuthState = () => {
+  token.value = localStorage.getItem('token') || ''
+  username.value = localStorage.getItem('username') || ''
+}
+
+watch(() => route.fullPath, syncAuthState, { immediate: true })
 
 const handleLogout = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
+  syncAuthState()
   router.push('/login')
 }
 </script>

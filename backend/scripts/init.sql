@@ -18,6 +18,38 @@ CREATE TABLE IF NOT EXISTS goods (
     CONSTRAINT chk_stock_non_negative CHECK (stock >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='商品表';
 
+-- 秒杀活动表
+CREATE TABLE IF NOT EXISTS seckill_activities (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '活动ID',
+    goods_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
+    title VARCHAR(255) NOT NULL COMMENT '活动标题',
+    start_time DATETIME(3) NOT NULL COMMENT '开始时间',
+    end_time DATETIME(3) NOT NULL COMMENT '结束时间',
+    status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '活动状态: 0-未开始, 1-进行中, 2-已结束, 3-停用',
+    max_buy_limit INT UNSIGNED NOT NULL COMMENT '每用户最大购买数量',
+    warmup_status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '预热状态: 0-未预热, 1-已预热',
+    is_default TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '是否默认活动: 0-否, 1-是',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    PRIMARY KEY (id),
+    KEY idx_activity_goods_id (goods_id),
+    KEY idx_activity_goods_default (goods_id, is_default),
+    KEY idx_activity_status_time (status, start_time, end_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='秒杀活动表';
+
+-- 管理员表
+CREATE TABLE IF NOT EXISTS admin_users (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '管理员ID',
+    username VARCHAR(50) NOT NULL COMMENT '管理员账号',
+    password VARCHAR(255) NOT NULL COMMENT '密码哈希',
+    status TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT '管理员状态: 0-禁用, 1-启用',
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '创建时间',
+    updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_admin_username (username),
+    KEY idx_admin_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='管理员表';
+
 -- 订单表 (核心修改)
 CREATE TABLE IF NOT EXISTS orders (
     -- 【修改点1】移除了 AUTO_INCREMENT
@@ -26,6 +58,7 @@ CREATE TABLE IF NOT EXISTS orders (
     
     user_id BIGINT UNSIGNED NOT NULL COMMENT '用户ID',
     goods_id BIGINT UNSIGNED NOT NULL COMMENT '商品ID',
+    activity_id BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '秒杀活动ID',
     quantity INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '购买数量',
     pay_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00 COMMENT '支付金额',
     status TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '订单状态: 0-未支付, 1-已支付, 2-已取消',
@@ -41,6 +74,7 @@ CREATE TABLE IF NOT EXISTS orders (
     INDEX idx_user_id (user_id),
     INDEX idx_user_goods_status (user_id, goods_id, status),
     INDEX idx_status_write_time (status, write_time), -- 超时订单扫描优化
+    INDEX idx_activity_id (activity_id),
     INDEX idx_orders_create_time (create_time),
     INDEX idx_orders_status_create_time (status, create_time),
     INDEX idx_goods_id (goods_id) -- 库存返还查询优化

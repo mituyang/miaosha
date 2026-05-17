@@ -2,11 +2,11 @@
   <div class="page seckill-page">
     <div class="page-header">
       <div class="page-copy">
-        <h1 class="page-title">秒杀商品</h1>
-        <p class="page-subtitle">仅展示当前已上架商品，库存以 Redis 预热结果为准。</p>
+        <h1 class="page-title">秒杀活动</h1>
+        <p class="page-subtitle">仅展示当前可见活动，库存以 Redis 活动预热结果为准。</p>
         <div class="page-facts">
-          <span class="page-fact">当前上架 {{ goodsList.length }} 款商品</span>
-          <span class="page-fact">库存读取自 Redis</span>
+          <span class="page-fact">当前活动 {{ activityList.length }} 场</span>
+          <span class="page-fact">按活动隔离库存与限购</span>
         </div>
       </div>
       <button class="btn btn-secondary" @click="refreshStock" :disabled="refreshing || loading">
@@ -16,41 +16,43 @@
 
     <div v-if="loading" class="loading-state">
       <div class="loading-spinner"></div>
-      <p>商品加载中...</p>
+      <p>活动加载中...</p>
     </div>
 
-    <div v-else-if="goodsList.length === 0" class="empty-state">
-      <h3>暂无可售商品</h3>
-      <p>管理员上架并预热库存后，这里会自动展示。</p>
-      <button class="btn btn-secondary empty-action" @click="loadGoods">重新加载</button>
+    <div v-else-if="activityList.length === 0" class="empty-state">
+      <h3>暂无秒杀活动</h3>
+      <p>管理员创建活动并预热库存后，这里会自动展示。</p>
+      <button class="btn btn-secondary empty-action" @click="loadActivities">重新加载</button>
     </div>
 
     <div v-else class="goods-grid">
-      <article v-for="goods in goodsList" :key="goods.id" class="goods-card">
+      <article v-for="activity in activityList" :key="activity.id" class="goods-card">
         <div class="goods-card-head">
-          <span class="goods-tag">秒杀</span>
-          <span class="goods-stock-text" :class="goods.stock > 0 ? 'stock-available' : 'stock-empty'">
-            {{ goods.stock > 0 ? `剩余 ${goods.stock}` : '已售罄' }}
+          <span class="goods-tag">{{ activityStatusText(activity) }}</span>
+          <span class="goods-stock-text" :class="activity.stock > 0 ? 'stock-available' : 'stock-empty'">
+            {{ activity.stock > 0 ? `剩余 ${activity.stock}` : '已售罄' }}
           </span>
         </div>
         <div class="goods-info">
-          <h3 class="goods-name">{{ goods.name }}</h3>
-          <p class="goods-description">{{ goods.description || '暂无商品描述' }}</p>
-          <div class="goods-price">¥{{ goods.price.toFixed(2) }}</div>
+          <h3 class="goods-name">{{ activity.title }}</h3>
+          <p class="goods-description">{{ activity.goodsDescription || '暂无商品描述' }}</p>
+          <div class="goods-meta">{{ activity.goodsName }} · 限购 {{ activity.maxBuyLimit }} 件</div>
+          <div class="goods-time">{{ formatActivityTime(activity.startTime) }} - {{ formatActivityTime(activity.endTime) }}</div>
+          <div class="goods-price">¥{{ activity.goodsPrice.toFixed(2) }}</div>
         </div>
         <div class="goods-actions">
           <div class="quantity-selector">
-            <label :for="`quantity-${goods.id}`">购买数量</label>
-            <select :id="`quantity-${goods.id}`" v-model="goods.quantity" class="quantity-select">
-              <option v-for="n in maxBuyLimit" :key="n" :value="n">{{ n }}</option>
+            <label :for="`quantity-${activity.id}`">购买数量</label>
+            <select :id="`quantity-${activity.id}`" v-model="activity.quantity" class="quantity-select">
+              <option v-for="n in activity.maxBuyLimit" :key="n" :value="n">{{ n }}</option>
             </select>
           </div>
           <button
             class="btn btn-primary btn-block"
-            :disabled="goods.stock <= 0 || seckilling === goods.id"
-            @click="handleSeckill(goods.id, goods.quantity)"
+            :disabled="!canBuy(activity) || seckilling === activity.id"
+            @click="handleSeckill(activity.id, activity.quantity)"
           >
-            {{ seckilling === goods.id ? '提交中...' : (goods.stock > 0 ? '立即抢购' : '已售罄') }}
+            {{ seckilling === activity.id ? '提交中...' : buyButtonText(activity) }}
           </button>
         </div>
       </article>
@@ -62,52 +64,60 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { doSeckill, getGoodsList, getStock } from '../api'
+import { doSeckill, getActivityList, getActivityStock } from '../api'
 import Toast from '../components/Toast.vue'
 
 const toast = ref(null)
 const loading = ref(false)
 const refreshing = ref(false)
 const seckilling = ref(null)
-const maxBuyLimit = 5
-const goodsList = ref([])
+const activityList = ref([])
 
 const showToast = (message, type = 'info') => {
   toast.value?.show(message, type)
 }
 
-const loadGoods = async () => {
+const normalizeActivity = item => ({
+  id: Number(item.id || 0),
+  goodsId: Number(item.goods_id || 0),
+  title: item.title || item.goods_name || '秒杀活动',
+  goodsName: item.goods_name || '-',
+  goodsDescription: item.goods_description || '',
+  goodsPrice: Number(item.goods_price || 0),
+  status: Number(item.status || 0),
+  warmupStatus: Number(item.warmup_status || 0),
+  maxBuyLimit: Math.max(Number(item.max_buy_limit || 1), 1),
+  startTime: item.start_time,
+  endTime: item.end_time,
+  stock: 0,
+  quantity: 1
+})
+
+const loadActivities = async () => {
   loading.value = true
   try {
-    const res = await getGoodsList()
+    const res = await getActivityList()
     if (res.data.code === 0) {
-      goodsList.value = (res.data.data || []).map(item => ({
-        id: item.ID,
-        name: item.ProductName,
-        description: item.Description,
-        price: Number(item.Price || 0),
-        stock: 0,
-        quantity: 1
-      }))
+      activityList.value = (res.data.data || []).map(normalizeActivity)
       await refreshStock()
     } else {
-      showToast(res.data.msg || '加载商品失败', 'error')
+      showToast(res.data.msg || '加载活动失败', 'error')
     }
   } catch (e) {
-    showToast(e.response?.data?.msg || '加载商品失败', 'error')
+    showToast(e.response?.data?.msg || '加载活动失败', 'error')
   } finally {
     loading.value = false
   }
 }
 
 const refreshStock = async () => {
-  if (goodsList.value.length === 0) return
+  if (activityList.value.length === 0) return
   refreshing.value = true
   try {
-    const requests = goodsList.value.map(async goods => {
-      const res = await getStock(goods.id)
+    const requests = activityList.value.map(async activity => {
+      const res = await getActivityStock(activity.id)
       if (res.data.code === 0) {
-        goods.stock = Number(res.data.data.stock || 0)
+        activity.stock = Number(res.data.data.stock || 0)
       }
     })
     await Promise.all(requests)
@@ -118,29 +128,69 @@ const refreshStock = async () => {
   }
 }
 
-const handleSeckill = async (goodsId, quantity) => {
-  const goods = goodsList.value.find(item => item.id === goodsId)
-  if (!goods) return
+const isInTimeWindow = activity => {
+  const now = Date.now()
+  const start = new Date(activity.startTime).getTime()
+  const end = new Date(activity.endTime).getTime()
+  return now >= start && now <= end
+}
 
-  if (goods.stock <= 0) {
-    showToast('商品已售罄', 'error')
+const canBuy = activity => {
+  return activity.stock > 0 && activity.warmupStatus === 1 && isInTimeWindow(activity) && [0, 1].includes(activity.status)
+}
+
+const buyButtonText = activity => {
+  if (activity.stock <= 0) return '已售罄'
+  if (activity.warmupStatus !== 1) return '待预热'
+  if (!isInTimeWindow(activity)) return '未开始'
+  if (![0, 1].includes(activity.status)) return '已结束'
+  return '立即抢购'
+}
+
+const activityStatusText = activity => {
+  if (activity.status === 3) return '停用'
+  if (activity.status === 2) return '已结束'
+  const now = Date.now()
+  if (now < new Date(activity.startTime).getTime()) return '未开始'
+  if (now > new Date(activity.endTime).getTime()) return '已结束'
+  return '秒杀中'
+}
+
+const formatActivityTime = value => {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${minute}`
+}
+
+const handleSeckill = async (activityId, quantity) => {
+  const activity = activityList.value.find(item => item.id === activityId)
+  if (!activity) return
+
+  if (!canBuy(activity)) {
+    showToast(buyButtonText(activity), 'error')
     return
   }
 
-  if (quantity < 1 || quantity > maxBuyLimit) {
-    showToast(`购买数量必须在 1-${maxBuyLimit} 之间`, 'error')
+  if (quantity < 1 || quantity > activity.maxBuyLimit) {
+    showToast(`购买数量必须在 1-${activity.maxBuyLimit} 之间`, 'error')
     return
   }
 
-  seckilling.value = goodsId
+  seckilling.value = activityId
   try {
-    const res = await doSeckill(goodsId, quantity)
+    const res = await doSeckill(activityId, quantity)
     if (res.data.code === 0) {
       showToast('秒杀请求已提交，请在订单页查看结果', 'success')
       await refreshStock()
     } else {
       if (res.data.code === 1001) {
-        goods.stock = 0
+        activity.stock = 0
       }
       showToast(res.data.msg || '请求失败', 'error')
     }
@@ -152,7 +202,7 @@ const handleSeckill = async (goodsId, quantity) => {
 }
 
 onMounted(() => {
-  loadGoods()
+  loadActivities()
 })
 </script>
 
@@ -244,7 +294,6 @@ onMounted(() => {
 .goods-name {
   font-size: 20px;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
 }
 
 .goods-description {
@@ -254,6 +303,13 @@ onMounted(() => {
   line-height: 1.6;
 }
 
+.goods-meta,
+.goods-time {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .goods-price {
   font-size: 28px;
   font-weight: 700;
@@ -261,7 +317,7 @@ onMounted(() => {
 }
 
 .goods-price::after {
-  content: ' 限时价';
+  content: ' 活动价';
   margin-left: 6px;
   color: var(--accent-strong);
   font-size: 13px;

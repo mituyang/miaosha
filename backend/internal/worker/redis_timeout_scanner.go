@@ -175,7 +175,7 @@ func (s *RedisTimeoutScanner) batchCancelOrders(ctx context.Context, items []red
 		// 失败的重新入队
 		expireAt := time.Now().Add(s.maxRetryDelay)
 		for _, item := range items {
-			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.SegmentID, item.Quantity, expireAt)
+			_ = redis.AddOrderTimeout(ctx, item.OrderID, item.UserID, item.GoodsID, item.ActivityID, item.SegmentID, item.Quantity, expireAt)
 		}
 		return err
 	}
@@ -233,11 +233,15 @@ func (s *RedisTimeoutScanner) cancelOrder(ctx context.Context, item redis.OrderT
 
 	// 返还库存
 	_ = s.goodsRepo.IncrStockBatch(item.GoodsID, quantity)
-	_ = redis.IncrSegmentStockBy(ctx, item.GoodsID, item.SegmentID, quantity)
+	activityID := item.ActivityID
+	if activityID == 0 {
+		activityID = item.GoodsID
+	}
+	_ = redis.IncrSegmentStockBy(ctx, activityID, item.SegmentID, quantity)
 
 	// 清除用户标记，允许重新抢购
-	_ = redis.ClearUserBought(ctx, item.GoodsID, item.UserID, quantity)
-	_ = redis.ClearProcessed(ctx, item.GoodsID, item.UserID, quantity)
+	_ = redis.ClearUserBought(ctx, activityID, item.UserID, quantity)
+	_ = redis.ClearProcessed(ctx, activityID, item.UserID, quantity)
 	_ = redis.MarkAdminOrderCancelled(ctx, item.GoodsID, quantity)
 
 	logger.Info.Printf("order cancelled by redis scanner: orderID=%d", item.OrderID)

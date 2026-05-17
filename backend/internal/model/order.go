@@ -20,6 +20,7 @@ type Order struct {
 	IDStr       string     `gorm:"-" json:"ID"` // JSON 返回字符串格式的 ID
 	UserID      uint64     `gorm:"not null;index" json:"UserID"`
 	GoodsID     uint64     `gorm:"not null" json:"GoodsID"`
+	ActivityID  uint64     `gorm:"not null;default:0;index" json:"ActivityID"`
 	Quantity    int        `gorm:"not null;default:1" json:"Quantity"` // 购买数量
 	PayAmount   float64    `gorm:"type:decimal(10,2);not null;default:0" json:"PayAmount"`
 	Status      uint8      `gorm:"not null;default:0" json:"Status"` // 0-未支付, 1-已支付, 2-已取消

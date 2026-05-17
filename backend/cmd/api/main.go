@@ -32,7 +32,8 @@ func warmUpStock(cfg *config.Config) {
 
 // warmUpAdminStats 启动时预热后台统计快照
 func warmUpAdminStats(cfg *config.Config) {
-	adminSvc := service.NewAdminService(service.NewSeckillService(cfg))
+	seckillSvc := service.NewSeckillService(cfg)
+	adminSvc := service.NewAdminService(seckillSvc, service.NewActivityService(cfg, seckillSvc), nil)
 	if err := adminSvc.WarmStatsCache(context.Background()); err != nil {
 		logger.Error.Printf("warmup admin stats failed: %v", err)
 		return
@@ -68,6 +69,16 @@ func main() {
 		logger.Error.Fatalf("ensure schema failed: %v", err)
 	}
 	logger.Info.Println("MySQL schema ensured")
+
+	if err := service.EnsureAdminAccount(cfg.Admin); err != nil {
+		logger.Error.Fatalf("ensure admin account failed: %v", err)
+	}
+	logger.Info.Println("Admin account ensured")
+
+	if err := service.EnsureDefaultActivities(cfg); err != nil {
+		logger.Error.Fatalf("ensure default activities failed: %v", err)
+	}
+	logger.Info.Println("Default seckill activities ensured")
 
 	// 3. 初始化 Redis
 	if err := redis.Init(&cfg.Redis); err != nil {

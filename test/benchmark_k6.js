@@ -81,7 +81,9 @@ function readEnv(key, fallback) {
 }
 
 const BASE_URL = readEnv('BASE_URL', 'http://localhost:8080').replace(/\/+$/, '');
-const ADMIN_SECRET = String(readEnv('ADMIN_SECRET', '')).trim();
+const ADMIN_USERNAME = String(readEnv('ADMIN_USERNAME', '')).trim();
+const ADMIN_PASSWORD = String(readEnv('ADMIN_PASSWORD', '')).trim();
+const ACTIVITY_ID = Number(readEnv('ACTIVITY_ID', 0));
 const GOODS_ID = Number(readEnv('GOODS_ID', 1));
 const QUANTITY = Number(readEnv('QUANTITY', 1));
 const EXECUTOR_MODE = String(readEnv('EXECUTOR_MODE', 'closed-loop')).trim().toLowerCase();
@@ -190,13 +192,33 @@ function parseJSONResponse(res) {
 }
 
 function warmUp() {
-  if (!ADMIN_SECRET) {
-    fail('缺少 ADMIN_SECRET 环境变量');
+  if (!ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    fail('缺少 ADMIN_USERNAME 或 ADMIN_PASSWORD 环境变量');
+  }
+
+  const loginRes = http.post(`${BASE_URL}/api/admin/login`, JSON.stringify({
+    username: ADMIN_USERNAME,
+    password: ADMIN_PASSWORD,
+  }), {
+    headers: buildJSONHeaders(),
+    timeout: HTTP_TIMEOUT,
+    tags: { name: 'admin_login' },
+  });
+
+  const loginBody = parseJSONResponse(loginRes);
+  const loginOK = check(loginRes, {
+    'admin login status is 200': (r) => r.status === 200,
+    'admin login body is json': () => loginBody !== null,
+    'admin login code is 0': () => loginBody !== null && loginBody.code === 0,
+    'admin login token exists': () => Boolean(loginBody?.data?.token),
+  });
+  if (!loginOK) {
+    fail(`管理员登录失败: status=${loginRes.status}, body=${loginRes.body}`);
   }
 
   const res = http.post(`${BASE_URL}/api/admin/warmup`, '', {
     headers: {
-      'X-Admin-Secret': ADMIN_SECRET,
+      Authorization: `Bearer ${loginBody.data.token}`,
     },
     timeout: HTTP_TIMEOUT,
     tags: { name: 'warmup' },
@@ -214,8 +236,27 @@ function warmUp() {
   }
 }
 
-function getStock() {
-  const res = http.get(`${BASE_URL}/api/seckill/stock/${GOODS_ID}`, {
+function resolveActivityID() {
+  if (ACTIVITY_ID > 0) {
+    return ACTIVITY_ID;
+  }
+
+  const res = http.get(`${BASE_URL}/api/activities`, {
+    timeout: HTTP_TIMEOUT,
+    tags: { name: 'activities' },
+  });
+  const body = parseJSONResponse(res);
+  if (res.status !== 200 || body === null || body.code !== 0 || !Array.isArray(body.data) || body.data.length === 0) {
+    return 0;
+  }
+  return Number(body.data[0].id || 0);
+}
+
+function getStock(activityID) {
+  const url = activityID > 0
+    ? `${BASE_URL}/api/seckill/activity/${activityID}/stock`
+    : `${BASE_URL}/api/seckill/stock/${GOODS_ID}`;
+  const res = http.get(url, {
     timeout: HTTP_TIMEOUT,
     tags: { name: 'stock' },
   });
@@ -233,22 +274,24 @@ function pickToken() {
 
 export function setup() {
   warmUp();
-  const initialStock = getStock();
+  const activityID = resolveActivityID();
+  const initialStock = getStock(activityID);
   console.log(
-    `[setup] token数=${tokens.length}, goods_id=${GOODS_ID}, quantity=${QUANTITY}, 初始库存=${initialStock === null ? 'unknown' : initialStock}`,
+    `[setup] token数=${tokens.length}, activity_id=${activityID || 'fallback-goods'}, goods_id=${GOODS_ID}, quantity=${QUANTITY}, 初始库存=${initialStock === null ? 'unknown' : initialStock}`,
   );
   return {
+    activityID: activityID,
     initialStock: initialStock,
   };
 }
 
-export default function () {
+export default function (data) {
   const startedAt = Date.now();
   const token = pickToken();
-  const payload = JSON.stringify({
-    goods_id: GOODS_ID,
-    quantity: QUANTITY,
-  });
+  const activityID = Number(data?.activityID || 0);
+  const payload = activityID > 0
+    ? JSON.stringify({ activity_id: activityID, quantity: QUANTITY })
+    : JSON.stringify({ goods_id: GOODS_ID, quantity: QUANTITY });
 
   const res = http.post(`${BASE_URL}/api/seckill/buy`, payload, {
     headers: buildJSONHeaders({
@@ -335,7 +378,7 @@ export default function () {
 }
 
 export function teardown(data) {
-  const finalStock = getStock();
+  const finalStock = getStock(Number(data?.activityID || 0));
   console.log(
     `[teardown] 初始库存=${data && data.initialStock !== undefined ? data.initialStock : 'unknown'}, 剩余库存=${finalStock === null ? 'unknown' : finalStock}`,
   );
@@ -516,6 +559,7 @@ export function handleSummary(data) {
   const summary = {
     config: {
       baseURL: BASE_URL,
+      activityID: ACTIVITY_ID,
       goodsID: GOODS_ID,
       quantity: QUANTITY,
       durationSec: DURATION,

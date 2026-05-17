@@ -22,6 +22,35 @@ func NewAdminHandler(adminSvc *service.AdminService) *AdminHandler {
 	return &AdminHandler{adminSvc: adminSvc}
 }
 
+type AdminLoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// Login 管理员登录
+func (h *AdminHandler) Login(c *gin.Context) {
+	var req AdminLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, util.Error(util.CodeParamError, "账号或密码不能为空"))
+		return
+	}
+
+	token, err := h.adminSvc.Login(req.Username, req.Password)
+	if err != nil {
+		switch err {
+		case service.ErrAdminNotFound, service.ErrAdminPassword:
+			c.JSON(http.StatusUnauthorized, util.Error(401, "管理员账号或密码错误"))
+		case service.ErrAdminDisabled:
+			c.JSON(http.StatusForbidden, util.Error(403, "管理员账号已禁用"))
+		default:
+			c.JSON(http.StatusInternalServerError, util.Error(util.CodeServerError, "后台登录失败"))
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, util.Success(gin.H{"token": token, "username": req.Username}))
+}
+
 // ListGoods 查询商品列表
 func (h *AdminHandler) ListGoods(c *gin.Context) {
 	status, ok := parseOptionalStatus(c)
@@ -312,6 +341,22 @@ func parseOptionalOrderStatus(c *gin.Context) (*uint8, bool) {
 	value, err := strconv.ParseUint(raw, 10, 8)
 	if err != nil || value > 2 {
 		c.JSON(http.StatusBadRequest, util.Error(util.CodeParamError, "订单状态参数无效"))
+		return nil, false
+	}
+
+	status := uint8(value)
+	return &status, true
+}
+
+func parseOptionalActivityStatus(c *gin.Context) (*uint8, bool) {
+	raw := strings.TrimSpace(c.Query("status"))
+	if raw == "" {
+		return nil, true
+	}
+
+	value, err := strconv.ParseUint(raw, 10, 8)
+	if err != nil || value > 3 {
+		c.JSON(http.StatusBadRequest, util.Error(util.CodeParamError, "活动状态参数无效"))
 		return nil, false
 	}
 

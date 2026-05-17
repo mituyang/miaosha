@@ -12,9 +12,15 @@ var (
 	ErrTokenInvalid = errors.New("登录凭证无效")
 )
 
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+)
+
 type Claims struct {
 	UserID   uint64 `json:"user_id"`
 	Username string `json:"username"`
+	Role     string `json:"role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -32,9 +38,19 @@ func NewJWT(secret string, expireHours int) *JWT {
 
 // GenerateToken 生成 JWT Token
 func (j *JWT) GenerateToken(userID uint64, username string) (string, error) {
+	return j.generateToken(userID, username, RoleUser)
+}
+
+// GenerateAdminToken 生成管理员 JWT Token
+func (j *JWT) GenerateAdminToken(adminID uint64, username string) (string, error) {
+	return j.generateToken(adminID, username, RoleAdmin)
+}
+
+func (j *JWT) generateToken(userID uint64, username, role string) (string, error) {
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(j.Expire)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

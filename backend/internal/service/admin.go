@@ -5,32 +5,109 @@ import (
 	"errors"
 	"strings"
 
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+
+	"seckill/internal/config"
 	"seckill/internal/dto"
 	"seckill/internal/model"
 	"seckill/internal/repository"
 	"seckill/pkg/database"
+	"seckill/pkg/jwt"
 	"seckill/pkg/redis"
 )
 
 var (
-	ErrGoodsHasOrders = errors.New("goods has orders")
-	ErrInvalidStatus  = errors.New("invalid status")
+	ErrGoodsHasOrders   = errors.New("goods has orders")
+	ErrInvalidStatus    = errors.New("invalid status")
+	ErrAdminNotFound    = errors.New("admin not found")
+	ErrAdminPassword    = errors.New("admin password incorrect")
+	ErrAdminDisabled    = errors.New("admin disabled")
+	ErrAdminJWTRequired = errors.New("admin jwt required")
 )
 
 type AdminService struct {
-	goodsRepo  *repository.GoodsRepository
-	orderRepo  *repository.OrderRepository
-	userRepo   *repository.UserRepository
-	seckillSvc *SeckillService
+	goodsRepo     *repository.GoodsRepository
+	orderRepo     *repository.OrderRepository
+	userRepo      *repository.UserRepository
+	adminUserRepo *repository.AdminUserRepository
+	seckillSvc    *SeckillService
+	activitySvc   *ActivityService
+	jwt           *jwt.JWT
 }
 
-func NewAdminService(seckillSvc *SeckillService) *AdminService {
+func NewAdminService(seckillSvc *SeckillService, activitySvc *ActivityService, jwtInstance *jwt.JWT) *AdminService {
 	return &AdminService{
-		goodsRepo:  repository.NewGoodsRepository(database.DB),
-		orderRepo:  repository.NewOrderRepository(database.DB),
-		userRepo:   repository.NewUserRepository(),
-		seckillSvc: seckillSvc,
+		goodsRepo:     repository.NewGoodsRepository(database.DB),
+		orderRepo:     repository.NewOrderRepository(database.DB),
+		userRepo:      repository.NewUserRepository(),
+		adminUserRepo: repository.NewAdminUserRepository(),
+		seckillSvc:    seckillSvc,
+		activitySvc:   activitySvc,
+		jwt:           jwtInstance,
 	}
+}
+
+// EnsureAdminAccount 从环境配置同步后台管理员账号
+func EnsureAdminAccount(cfg config.AdminConfig) error {
+	username := strings.TrimSpace(cfg.Username)
+	password := strings.TrimSpace(cfg.Password)
+	if username == "" || password == "" {
+		return errors.New("admin username and password are required")
+	}
+
+	repo := repository.NewAdminUserRepository()
+	admin, err := repo.FindByUsername(username)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return hashErr
+		}
+		return repo.Create(&model.AdminUser{
+			Username: username,
+			Password: string(hashedPassword),
+			Status:   model.AdminUserStatusEnabled,
+		})
+	}
+
+	if admin.Status != model.AdminUserStatusEnabled ||
+		bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(password)) != nil {
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return hashErr
+		}
+		return repo.UpdatePasswordAndStatus(admin.ID, string(hashedPassword), model.AdminUserStatusEnabled)
+	}
+
+	return nil
+}
+
+// Login 管理员登录
+func (s *AdminService) Login(username, password string) (string, error) {
+	if s.jwt == nil {
+		return "", ErrAdminJWTRequired
+	}
+
+	admin, err := s.adminUserRepo.FindByUsername(strings.TrimSpace(username))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", ErrAdminNotFound
+		}
+		return "", err
+	}
+
+	if admin.Status == model.AdminUserStatusDisabled {
+		return "", ErrAdminDisabled
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.Password), []byte(password)); err != nil {
+		return "", ErrAdminPassword
+	}
+
+	return s.jwt.GenerateAdminToken(admin.ID, admin.Username)
 }
 
 // ListGoods 查询商品列表
@@ -56,6 +133,11 @@ func (s *AdminService) CreateGoods(ctx context.Context, req dto.AdminGoodsUpsert
 
 	if err := s.goodsRepo.Create(goods); err != nil {
 		return nil, err
+	}
+	if s.activitySvc != nil {
+		if err := s.activitySvc.EnsureDefaultForGoods(ctx, goods); err != nil {
+			return nil, err
+		}
 	}
 	if err := redis.SetGoodsOnSale(ctx, goods.ID, goods.Status == model.GoodsStatusOnSale); err != nil {
 		return nil, err
@@ -91,7 +173,7 @@ func (s *AdminService) UpdateGoods(ctx context.Context, goodsID uint64, req dto.
 		return err
 	}
 	if goods.Status == model.GoodsStatusOffShelf {
-		if err := redis.ClearSeckillData(ctx, goodsID); err != nil {
+		if err := s.seckillSvc.RefreshActivitiesByGoods(ctx, goodsID); err != nil {
 			return err
 		}
 	}
@@ -126,7 +208,7 @@ func (s *AdminService) DeleteGoods(ctx context.Context, goodsID uint64) error {
 	if err := s.goodsRepo.Delete(goodsID); err != nil {
 		return err
 	}
-	if err := redis.ClearSeckillData(ctx, goodsID); err != nil {
+	if err := s.seckillSvc.ClearActivitiesByGoods(ctx, goodsID); err != nil {
 		return err
 	}
 	_ = redis.IncrementAdminGoodsDeleted(ctx, goodsID, int(goods.Stock), goods.Status)

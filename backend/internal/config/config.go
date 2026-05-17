@@ -28,7 +28,15 @@ type StartupConfig struct {
 }
 
 type SeckillConfig struct {
-	MaxBuyLimit int `yaml:"max_buy_limit"` // 每用户每商品最大购买数量，默认 5
+	MaxBuyLimit     int                   `yaml:"max_buy_limit"` // 每用户每商品最大购买数量
+	DefaultActivity DefaultActivityConfig `yaml:"default_activity"`
+}
+
+type DefaultActivityConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	TitleTemplate string `yaml:"title_template"`
+	StartOffset   string `yaml:"start_offset"`
+	EndOffset     string `yaml:"end_offset"`
 }
 
 type RateLimitConfig struct {
@@ -49,7 +57,8 @@ type JWTConfig struct {
 }
 
 type AdminConfig struct {
-	Secret string `yaml:"secret"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 type ServerConfig struct {
@@ -201,11 +210,17 @@ func applyEnvOverrides(cfg *Config) error {
 		return err
 	}
 
-	adminSecret, err := requireNonEmptyEnv("ADMIN_SECRET")
+	adminUsername, err := requireNonEmptyEnv("ADMIN_USERNAME")
 	if err != nil {
 		return err
 	}
-	cfg.Admin.Secret = adminSecret
+	cfg.Admin.Username = adminUsername
+
+	adminPassword, err := requireNonEmptyEnv("ADMIN_PASSWORD")
+	if err != nil {
+		return err
+	}
+	cfg.Admin.Password = adminPassword
 
 	return nil
 }

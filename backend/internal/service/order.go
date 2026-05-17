@@ -40,8 +40,6 @@ func (s *OrderService) PayOrder(ctx context.Context, orderID, userID uint64) err
 	if err := s.orderRepo.Pay(orderID, payTime); err != nil {
 		return err
 	}
-	// 更新 Redis 状态为已支付
-	_ = redis.SetUserStatus(ctx, order.GoodsID, userID, 1)
 	// 从超时队列移除（支付成功，不需要超时取消）
 	_ = redis.RemoveOrderTimeout(ctx, orderID)
 	_ = redis.MarkAdminOrderPaid(ctx, order.GoodsID, order.Quantity, order.PayAmount, payTime)
@@ -76,16 +74,20 @@ func (s *OrderService) CancelOrder(ctx context.Context, orderID, userID uint64) 
 	_ = s.goodsRepo.IncrStockBatch(order.GoodsID, quantity)
 
 	// 3. 返还 Redis 库存
-	_ = redis.IncrStockBy(ctx, order.GoodsID, quantity)
+	activityID := order.ActivityID
+	if activityID == 0 {
+		activityID = order.GoodsID
+	}
+	_ = redis.IncrStockBy(ctx, activityID, quantity)
 
 	// 4. 清除用户购买记录 (减少已购数量)
-	_ = redis.ClearUserBought(ctx, order.GoodsID, userID, quantity)
+	_ = redis.ClearUserBought(ctx, activityID, userID, quantity)
 
 	// 5. 清除已扣库存标记
 	_ = redis.ClearUserDeducted(ctx, order.GoodsID, userID)
 
 	// 6. 清除已处理标记 (减少已处理数量)
-	_ = redis.ClearProcessed(ctx, order.GoodsID, userID, quantity)
+	_ = redis.ClearProcessed(ctx, activityID, userID, quantity)
 	_ = redis.MarkAdminOrderCancelled(ctx, order.GoodsID, quantity)
 
 	return nil

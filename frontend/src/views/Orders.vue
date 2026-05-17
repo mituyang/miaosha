@@ -51,7 +51,7 @@
             <div class="product-mark">{{ productMonogram(order.goods_name || `商品${order.GoodsID}`) }}</div>
             <div class="product-detail">
               <h3 class="product-name">{{ order.goods_name || `商品 ID: ${order.GoodsID}` }}</h3>
-              <p class="product-spec">数量 {{ order.Quantity || 1 }} 件</p>
+              <p class="product-spec">{{ order.activity_title || '默认活动' }} · 数量 {{ order.Quantity || 1 }} 件</p>
             </div>
           </div>
 

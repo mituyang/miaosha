@@ -206,6 +206,13 @@ func (c *KafkaConsumer) handleMessage(msg *kafka.Message, reader *kafka.Reader) 
 	if seckillMsg.UserID == 0 || seckillMsg.GoodsID == 0 {
 		return nil
 	}
+	if seckillMsg.ActivityID == 0 {
+		if activityID, ok, err := redis.GetDefaultActivityID(context.Background(), seckillMsg.GoodsID); err == nil && ok {
+			seckillMsg.ActivityID = activityID
+		} else {
+			seckillMsg.ActivityID = seckillMsg.GoodsID
+		}
+	}
 
 	return c.enqueueOrder(&seckillMsg, bornTime, storeTime, reader, *msg)
 }
@@ -274,16 +281,16 @@ func (c *KafkaConsumer) flushBatch(batch []*kafkaOrderBatchItem) {
 		return
 	}
 
-	// 按商品ID分组
-	groupByGoods := make(map[uint64][]*kafkaOrderBatchItem)
+	// 按活动ID分组，Redis 幂等和库存返还都隔离到活动维度
+	groupByActivity := make(map[uint64][]*kafkaOrderBatchItem)
 	for _, item := range batch {
-		groupByGoods[item.msg.GoodsID] = append(groupByGoods[item.msg.GoodsID], item)
+		groupByActivity[item.msg.ActivityID] = append(groupByActivity[item.msg.ActivityID], item)
 	}
 
 	// 收集成功处理的消息
 	successItems := make([]*kafkaOrderBatchItem, 0, len(batch))
-	for goodsID, items := range groupByGoods {
-		successList := c.flushGoodsBatch(goodsID, items)
+	for activityID, items := range groupByActivity {
+		successList := c.flushActivityBatch(activityID, items)
 		successItems = append(successItems, successList...)
 	}
 
@@ -291,10 +298,14 @@ func (c *KafkaConsumer) flushBatch(batch []*kafkaOrderBatchItem) {
 	c.commitOffsetsByReader(successItems)
 }
 
-// flushGoodsBatch 批量写入单个商品的订单，返回成功处理的 items
-func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatchItem) []*kafkaOrderBatchItem {
+// flushActivityBatch 批量写入单个活动的订单，返回成功处理的 items
+func (c *KafkaConsumer) flushActivityBatch(activityID uint64, items []*kafkaOrderBatchItem) []*kafkaOrderBatchItem {
 	ctx := context.Background()
 	writeTime := time.Now()
+	if len(items) == 0 {
+		return nil
+	}
+	goodsID := items[0].msg.GoodsID
 
 	// 获取商品信息（缓存）
 	goods, err := c.getGoodsCached(goodsID)
@@ -319,9 +330,9 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 		}
 	}
 
-	checkResults, err := redis.CheckProcessedBatch(ctx, goodsID, checkItems)
+	checkResults, err := redis.CheckProcessedBatch(ctx, activityID, checkItems)
 	if err != nil {
-		logger.Error.Printf("batch check processed failed: goodsID=%d, err=%v", goodsID, err)
+		logger.Error.Printf("batch check processed failed: activityID=%d, goodsID=%d, err=%v", activityID, goodsID, err)
 		for _, item := range items {
 			c.sendToDLQ(&item.kafkaMsg, "check_processed_failed")
 		}
@@ -375,6 +386,7 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 			ID:          util.NextID(),
 			UserID:      msg.UserID,
 			GoodsID:     goodsID,
+			ActivityID:  activityID,
 			Quantity:    quantity,
 			PayAmount:   goods.Price * float64(quantity),
 			Status:      0,
@@ -428,15 +440,15 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 
 	if err != nil {
 		if errors.Is(err, ErrStockNotEnough) {
-			logger.Error.Printf("MySQL stock not enough: goodsID=%d, count=%d", goodsID, len(items))
+			logger.Error.Printf("MySQL stock not enough: activityID=%d, goodsID=%d, count=%d", activityID, goodsID, len(items))
 			for _, item := range items {
 				quantity := item.msg.Quantity
 				if quantity <= 0 {
 					quantity = 1
 				}
-				_ = redis.ClearUserBought(ctx, goodsID, item.msg.UserID, quantity)
-				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID, quantity)
-				_ = redis.IncrSegmentStockBy(ctx, goodsID, item.msg.SegmentID, quantity)
+				_ = redis.ClearUserBought(ctx, activityID, item.msg.UserID, quantity)
+				_ = redis.ClearProcessed(ctx, activityID, item.msg.UserID, quantity)
+				_ = redis.IncrSegmentStockBy(ctx, activityID, item.msg.SegmentID, quantity)
 			}
 			for _, item := range items {
 				c.sendToDLQ(&item.kafkaMsg, "stock_not_enough")
@@ -447,9 +459,9 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 				if quantity <= 0 {
 					quantity = 1
 				}
-				_ = redis.ClearProcessed(ctx, goodsID, item.msg.UserID, quantity)
+				_ = redis.ClearProcessed(ctx, activityID, item.msg.UserID, quantity)
 			}
-			logger.Error.Printf("batch write failed: goodsID=%d, err=%v", goodsID, err)
+			logger.Error.Printf("batch write failed: activityID=%d, goodsID=%d, err=%v", activityID, goodsID, err)
 			for _, item := range items {
 				c.sendToDLQ(&item.kafkaMsg, "batch_write_failed")
 			}
@@ -466,20 +478,21 @@ func (c *KafkaConsumer) flushGoodsBatch(goodsID uint64, items []*kafkaOrderBatch
 	timeoutItems := make([]redis.OrderTimeoutItem, len(orders))
 	for i, order := range orders {
 		timeoutItems[i] = redis.OrderTimeoutItem{
-			OrderID:   order.ID,
-			UserID:    order.UserID,
-			GoodsID:   goodsID,
-			SegmentID: items[i].msg.SegmentID,
-			Quantity:  order.Quantity,
+			OrderID:    order.ID,
+			UserID:     order.UserID,
+			GoodsID:    goodsID,
+			ActivityID: activityID,
+			SegmentID:  items[i].msg.SegmentID,
+			Quantity:   order.Quantity,
 		}
 	}
 	expireAt := time.Now().Add(time.Duration(timeoutSeconds) * time.Second)
 	if err := redis.AddOrderTimeoutBatch(ctx, timeoutItems, expireAt); err != nil {
-		logger.Error.Printf("batch add order timeout failed: goodsID=%d, err=%v", goodsID, err)
+		logger.Error.Printf("batch add order timeout failed: activityID=%d, goodsID=%d, err=%v", activityID, goodsID, err)
 	}
 
 	_ = redis.IncrementAdminOrdersCreated(ctx, orders)
-	logger.Info.Printf("batch write success: goodsID=%d, count=%d", goodsID, len(orders))
+	logger.Info.Printf("batch write success: activityID=%d, goodsID=%d, count=%d", activityID, goodsID, len(orders))
 	return append(items, duplicateItems...)
 }
 

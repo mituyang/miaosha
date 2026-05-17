@@ -150,7 +150,8 @@ services:
     environment:
       TZ: Asia/Shanghai
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
-      ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET is required in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env}
       STARTUP_FLUSH_REDIS_ON_START: ${STARTUP_FLUSH_REDIS_ON_START:-false}
     volumes:
       - ./backend/configs/config.docker.yaml:/app/configs/config.yaml
@@ -174,7 +175,8 @@ services:
     environment:
       TZ: Asia/Shanghai
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
-      ADMIN_SECRET: ${ADMIN_SECRET:?ADMIN_SECRET is required in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env}
     volumes:
       - ./backend/configs/config.docker.yaml:/app/configs/config.yaml
     depends_on:

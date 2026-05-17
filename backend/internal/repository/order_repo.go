@@ -50,13 +50,15 @@ func (r *OrderRepository) ExistsByUserAndGoods(userID, goodsID uint64) (bool, er
 // OrderWithGoods 订单带商品信息
 type OrderWithGoods struct {
 	model.Order
-	GoodsName string `json:"goods_name"`
+	GoodsName     string `json:"goods_name"`
+	ActivityTitle string `json:"activity_title"`
 }
 
 type AdminOrderItem struct {
 	model.Order
-	GoodsName string `json:"goods_name"`
-	Username  string `json:"username"`
+	GoodsName     string `json:"goods_name"`
+	ActivityTitle string `json:"activity_title"`
+	Username      string `json:"username"`
 }
 
 type OrderFilter struct {
@@ -78,8 +80,9 @@ func (o *AdminOrderItem) AfterFind(tx *gorm.DB) error {
 func (r *OrderRepository) FindByUserID(userID uint64) ([]OrderWithGoods, error) {
 	var orders []OrderWithGoods
 	err := r.db.Table("orders").
-		Select("orders.*, goods.product_name as goods_name").
+		Select("orders.*, goods.product_name AS goods_name, seckill_activities.title AS activity_title").
 		Joins("LEFT JOIN goods ON orders.goods_id = goods.id").
+		Joins("LEFT JOIN seckill_activities ON orders.activity_id = seckill_activities.id").
 		Where("orders.user_id = ?", userID).
 		Order("orders.create_time DESC").
 		Find(&orders).Error
@@ -102,6 +105,7 @@ func (r *OrderRepository) ListPage(filter OrderFilter, page, pageSize int) ([]Ad
 	var orders []AdminOrderItem
 	query := r.db.Table("orders").
 		Joins("LEFT JOIN goods ON orders.goods_id = goods.id").
+		Joins("LEFT JOIN seckill_activities ON orders.activity_id = seckill_activities.id").
 		Joins("LEFT JOIN users ON orders.user_id = users.id")
 
 	if filter.Status != nil {
@@ -110,8 +114,8 @@ func (r *OrderRepository) ListPage(filter OrderFilter, page, pageSize int) ([]Ad
 	if filter.Keyword != "" {
 		likeKeyword := "%" + filter.Keyword + "%"
 		query = query.Where(
-			"CAST(orders.id AS CHAR) LIKE ? OR CAST(orders.user_id AS CHAR) LIKE ? OR goods.product_name LIKE ? OR users.username LIKE ?",
-			likeKeyword, likeKeyword, likeKeyword, likeKeyword,
+			"CAST(orders.id AS CHAR) LIKE ? OR CAST(orders.user_id AS CHAR) LIKE ? OR goods.product_name LIKE ? OR seckill_activities.title LIKE ? OR users.username LIKE ?",
+			likeKeyword, likeKeyword, likeKeyword, likeKeyword, likeKeyword,
 		)
 	}
 
@@ -120,7 +124,7 @@ func (r *OrderRepository) ListPage(filter OrderFilter, page, pageSize int) ([]Ad
 		return nil, 0, err
 	}
 
-	err := query.Select("orders.*, goods.product_name AS goods_name, users.username AS username").
+	err := query.Select("orders.*, goods.product_name AS goods_name, seckill_activities.title AS activity_title, users.username AS username").
 		Order("orders.id DESC").
 		Limit(pageSize).
 		Offset((page - 1) * pageSize).
@@ -135,8 +139,9 @@ func (r *OrderRepository) ListPage(filter OrderFilter, page, pageSize int) ([]Ad
 func (r *OrderRepository) GetDetail(orderID uint64) (*AdminOrderItem, error) {
 	var order AdminOrderItem
 	err := r.db.Table("orders").
-		Select("orders.*, goods.product_name AS goods_name, users.username AS username").
+		Select("orders.*, goods.product_name AS goods_name, seckill_activities.title AS activity_title, users.username AS username").
 		Joins("LEFT JOIN goods ON orders.goods_id = goods.id").
+		Joins("LEFT JOIN seckill_activities ON orders.activity_id = seckill_activities.id").
 		Joins("LEFT JOIN users ON orders.user_id = users.id").
 		Where("orders.id = ?", orderID).
 		First(&order).Error

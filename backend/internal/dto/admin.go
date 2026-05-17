@@ -14,6 +14,19 @@ type AdminUserStatusRequest struct {
 	Status uint8 `json:"status" binding:"oneof=0 1"`
 }
 
+type AdminActivityUpsertRequest struct {
+	GoodsID     uint64 `json:"goods_id" binding:"required"`
+	Title       string `json:"title" binding:"required,min=1,max=255"`
+	StartTime   string `json:"start_time" binding:"required"`
+	EndTime     string `json:"end_time" binding:"required"`
+	Status      uint8  `json:"status" binding:"oneof=0 1 2 3"`
+	MaxBuyLimit uint   `json:"max_buy_limit" binding:"required,gte=1"`
+}
+
+type AdminActivityStatusRequest struct {
+	Status uint8 `json:"status" binding:"oneof=0 1 2 3"`
+}
+
 type AdminStatsResponse struct {
 	OrderStats   *repository.OrderStats         `json:"order_stats"`
 	UserStats    *repository.UserStats          `json:"user_stats"`
@@ -62,7 +75,9 @@ type AdminRedisWarmupLock struct {
 
 type AdminRedisGoodsRuntime struct {
 	GoodsID           uint64                   `json:"goods_id"`
+	ActivityID        uint64                   `json:"activity_id"`
 	GoodsName         string                   `json:"goods_name"`
+	ActivityTitle     string                   `json:"activity_title"`
 	OnSale            bool                     `json:"on_sale"`
 	TotalStock        int64                    `json:"total_stock"`
 	BoughtUsers       int64                    `json:"bought_users"`

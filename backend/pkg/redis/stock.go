@@ -21,8 +21,8 @@ func SetWarmupLockExpire(seconds int) {
 	}
 }
 
-// InitStock 初始化商品库存到 Redis - 分段存储
-func InitStock(ctx context.Context, goodsID uint64, stock int) error {
+// InitStock 初始化活动库存到 Redis - 分段存储
+func InitStock(ctx context.Context, activityID uint64, stock int) error {
 	// 计算每个分段的库存
 	baseStock := stock / SegmentCount
 	remainder := stock % SegmentCount
@@ -33,7 +33,7 @@ func InitStock(ctx context.Context, goodsID uint64, stock int) error {
 		if i < remainder {
 			segmentStock++ // 余数分配到前几个分段
 		}
-		segmentKey := SegmentStockKey(goodsID, i)
+		segmentKey := SegmentStockKey(activityID, i)
 		pipe.Set(ctx, segmentKey, segmentStock, 0)
 	}
 
@@ -41,11 +41,11 @@ func InitStock(ctx context.Context, goodsID uint64, stock int) error {
 	return err
 }
 
-// GetStock 获取当前总库存（汇总所有分段）
-func GetStock(ctx context.Context, goodsID uint64) (int, error) {
+// GetStock 获取当前活动总库存（汇总所有分段）
+func GetStock(ctx context.Context, activityID uint64) (int, error) {
 	total := 0
 	for i := 0; i < SegmentCount; i++ {
-		segmentKey := SegmentStockKey(goodsID, i)
+		segmentKey := SegmentStockKey(activityID, i)
 		val, err := Client.Get(ctx, segmentKey).Result()
 		if err != nil {
 			continue // 分段不存在则跳过
@@ -56,41 +56,41 @@ func GetStock(ctx context.Context, goodsID uint64) (int, error) {
 	return total, nil
 }
 
-// ClearSeckillData 清理秒杀数据 (活动结束后调用)
-func ClearSeckillData(ctx context.Context, goodsID uint64) error {
-	keys := []string{BoughtKey(goodsID), DeductedKey(goodsID), ProcessedKey(goodsID)}
+// ClearSeckillData 清理活动秒杀数据
+func ClearSeckillData(ctx context.Context, activityID uint64) error {
+	keys := []string{ActivityMetaKey(activityID), BoughtKey(activityID), DeductedKey(activityID), ProcessedKey(activityID)}
 	for i := 0; i < SegmentCount; i++ {
-		keys = append(keys, SegmentStockKey(goodsID, i))
+		keys = append(keys, SegmentStockKey(activityID, i))
 	}
 	return Client.Del(ctx, keys...).Err()
 }
 
 // IncrSegmentStock 增加分段库存 (订单取消时返还)
-func IncrSegmentStock(ctx context.Context, goodsID uint64, segmentID int) error {
-	segmentKey := SegmentStockKey(goodsID, segmentID)
+func IncrSegmentStock(ctx context.Context, activityID uint64, segmentID int) error {
+	segmentKey := SegmentStockKey(activityID, segmentID)
 	return Client.Incr(ctx, segmentKey).Err()
 }
 
 // IncrSegmentStockBy 增加分段库存指定数量 (订单取消时返还)
-func IncrSegmentStockBy(ctx context.Context, goodsID uint64, segmentID int, quantity int) error {
-	segmentKey := SegmentStockKey(goodsID, segmentID)
+func IncrSegmentStockBy(ctx context.Context, activityID uint64, segmentID int, quantity int) error {
+	segmentKey := SegmentStockKey(activityID, segmentID)
 	return Client.IncrBy(ctx, segmentKey, int64(quantity)).Err()
 }
 
 // IncrStock 增加库存到第一个分段 (用户主动取消订单时，没有分段信息)
-func IncrStock(ctx context.Context, goodsID uint64) error {
+func IncrStock(ctx context.Context, activityID uint64) error {
 	// 默认返还到分段0
-	return IncrSegmentStock(ctx, goodsID, 0)
+	return IncrSegmentStock(ctx, activityID, 0)
 }
 
 // IncrStockBy 增加库存指定数量到第一个分段
-func IncrStockBy(ctx context.Context, goodsID uint64, quantity int) error {
-	return IncrSegmentStockBy(ctx, goodsID, 0, quantity)
+func IncrStockBy(ctx context.Context, activityID uint64, quantity int) error {
+	return IncrSegmentStockBy(ctx, activityID, 0, quantity)
 }
 
 // ClearUserBought 清除用户购买记录 (订单取消时减少已购数量)
-func ClearUserBought(ctx context.Context, goodsID, userID uint64, quantity int) error {
-	boughtKey := BoughtKey(goodsID)
+func ClearUserBought(ctx context.Context, activityID, userID uint64, quantity int) error {
+	boughtKey := BoughtKey(activityID)
 	field := fmt.Sprintf("%d", userID)
 	val, err := Client.HIncrBy(ctx, boughtKey, field, int64(-quantity)).Result()
 	if err != nil {
@@ -104,14 +104,14 @@ func ClearUserBought(ctx context.Context, goodsID, userID uint64, quantity int) 
 }
 
 // AcquireWarmupLock 获取预热分布式锁
-func AcquireWarmupLock(ctx context.Context, goodsID uint64) (bool, error) {
-	lockKey := fmt.Sprintf("%s%d", warmupLockKey, goodsID)
+func AcquireWarmupLock(ctx context.Context, activityID uint64) (bool, error) {
+	lockKey := fmt.Sprintf("%s%d", warmupLockKey, activityID)
 	return Client.SetNX(ctx, lockKey, "1", warmupLockExpire).Result()
 }
 
 // ReleaseWarmupLock 释放预热分布式锁
-func ReleaseWarmupLock(ctx context.Context, goodsID uint64) error {
-	lockKey := fmt.Sprintf("%s%d", warmupLockKey, goodsID)
+func ReleaseWarmupLock(ctx context.Context, activityID uint64) error {
+	lockKey := fmt.Sprintf("%s%d", warmupLockKey, activityID)
 	return Client.Del(ctx, lockKey).Err()
 }
 
