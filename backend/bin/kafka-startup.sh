@@ -23,7 +23,7 @@ for i in $(seq 1 $MAX_RETRIES); do
         echo "Zookeeper probe returned an exception on attempt $i/$MAX_RETRIES:"
         printf '%s\n' "$zk_output"
     fi
-    if printf '%s\n' "$zk_output" | grep -q "\\[.*brokers.*\\]"; then
+    if printf '%s\n' "$zk_output" | grep -q "SyncConnected"; then
         echo "Zookeeper is ready"
         break
     fi
