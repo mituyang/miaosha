@@ -235,7 +235,7 @@ onMounted(() => {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -261,7 +261,7 @@ onMounted(() => {
   border-radius: 999px;
   background: rgba(179, 139, 58, 0.16);
   color: inherit;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -303,7 +303,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 14px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .order-no {
@@ -317,7 +317,7 @@ onMounted(() => {
   min-height: 32px;
   padding: 0 12px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
 }
 
@@ -360,7 +360,7 @@ onMounted(() => {
   border-radius: 18px;
   background: linear-gradient(180deg, rgba(243, 234, 215, 0.88) 0%, rgba(255, 255, 255, 0.94) 100%);
   color: var(--accent-strong);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
@@ -371,7 +371,7 @@ onMounted(() => {
 
 .product-name {
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.4;
 }
@@ -379,7 +379,7 @@ onMounted(() => {
 .product-spec {
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .product-quantity,
@@ -392,19 +392,19 @@ onMounted(() => {
 
 .quantity-value {
   color: var(--text-primary);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
 }
 
 .quantity-label,
 .price-symbol {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .price-value {
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: -0.03em;
 }
@@ -421,7 +421,7 @@ onMounted(() => {
   flex-wrap: wrap;
   gap: 14px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .order-actions {

@@ -146,7 +146,7 @@ services:
       dockerfile: Dockerfile
     container_name: seckill-backend
     ports:
-      - "8080:8080"
+      - "18080:8080"
     environment:
       TZ: Asia/Shanghai
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}

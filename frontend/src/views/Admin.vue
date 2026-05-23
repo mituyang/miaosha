@@ -50,7 +50,7 @@
           <button class="btn btn-secondary" @click="refreshCurrentTab" :disabled="tabLoading">
             {{ tabLoading ? '刷新中...' : '刷新当前模块' }}
           </button>
-          <a href="/" class="btn btn-secondary admin-link">前往秒杀前台</a>
+          <a href="/seckill" class="btn btn-secondary admin-link">前往秒杀前台</a>
           <button class="btn btn-secondary" @click="logoutAdmin">退出后台</button>
         </div>
       </header>
@@ -328,7 +328,7 @@
                   <td>{{ order.activityTitle || '-' }}</td>
                   <td>{{ order.quantity }}</td>
                   <td>{{ formatCurrency(order.payAmount) }}</td>
-                  <td><span :class="['status-badge', orderStatusClass(order.status)]">{{ orderStatusText(order.status) }}</span></td>
+                  <td class="status-cell"><span :class="['status-badge', orderStatusClass(order.status)]">{{ orderStatusText(order.status) }}</span></td>
                   <td>{{ formatTime(order.createTime) }}</td>
                   <td><button class="text-button" @click="fetchOrderDetail(order.id)">详情</button></td>
                 </tr>
@@ -1927,7 +1927,7 @@ onMounted(async () => {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1947,7 +1947,7 @@ onMounted(async () => {
 }
 
 .auth-title {
-  font-size: 34px;
+  font-size: 38px;
 }
 
 .auth-desc,
@@ -1972,12 +1972,12 @@ onMounted(async () => {
 
 .admin-title {
   margin-top: 12px;
-  font-size: 32px;
+  font-size: 36px;
 }
 
 .admin-subtitle {
   margin-top: 8px;
-  font-size: 17px;
+  font-size: 19px;
 }
 
 .admin-header-actions {
@@ -2003,7 +2003,7 @@ onMounted(async () => {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.74);
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -2059,7 +2059,7 @@ onMounted(async () => {
 
 .panel-note {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .panel-side {
@@ -2117,21 +2117,21 @@ onMounted(async () => {
   display: block;
   margin-bottom: 12px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
 .stat-value {
   display: block;
   color: var(--text-primary);
-  font-size: 32px;
+  font-size: 36px;
   line-height: 1.1;
 }
 
 .stat-meta {
   margin-top: 10px;
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .keyspace-grid {
@@ -2156,13 +2156,13 @@ onMounted(async () => {
 
 .kv-card span {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .kv-card strong {
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.6;
   word-break: break-word;
 }
@@ -2209,12 +2209,12 @@ onMounted(async () => {
 
 .mini-item strong {
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .mini-item span {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.6;
   word-break: break-word;
 }
@@ -2314,12 +2314,12 @@ onMounted(async () => {
   border-bottom: 1px solid rgba(23, 23, 23, 0.07);
   text-align: left;
   vertical-align: top;
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .admin-table th {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -2332,7 +2332,7 @@ onMounted(async () => {
 .table-subtitle {
   margin-top: 4px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -2350,7 +2350,7 @@ onMounted(async () => {
   border-radius: 999px;
   background: rgba(23, 23, 23, 0.06);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -2368,11 +2368,17 @@ onMounted(async () => {
 .status-badge {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
+}
+
+.status-cell {
+  min-width: 86px;
+  white-space: nowrap;
 }
 
 .status-on {
@@ -2401,7 +2407,7 @@ onMounted(async () => {
   border: none;
   background: none;
   color: var(--accent-strong);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -2434,13 +2440,13 @@ onMounted(async () => {
 
 .detail-grid span {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .detail-grid strong {
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.5;
   word-break: break-all;
 }
@@ -2452,7 +2458,7 @@ onMounted(async () => {
   gap: 12px;
   margin-top: 18px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .pager-actions {
@@ -2474,7 +2480,7 @@ onMounted(async () => {
 
 .warmup-desc {
   color: var(--text-secondary);
-  font-size: 16px;
+  font-size: 18px;
   line-height: 1.7;
 }
 
@@ -2521,7 +2527,7 @@ onMounted(async () => {
 
   .auth-title,
   .admin-title {
-    font-size: 28px;
+    font-size: 32px;
   }
 
   .toolbar,

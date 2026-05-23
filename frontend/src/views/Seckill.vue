@@ -232,7 +232,7 @@ onMounted(() => {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.74);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -268,12 +268,12 @@ onMounted(() => {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .goods-stock-text {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -292,26 +292,26 @@ onMounted(() => {
 }
 
 .goods-name {
-  font-size: 20px;
+  font-size: 22px;
   color: var(--text-primary);
 }
 
 .goods-description {
   min-height: 44px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
 .goods-meta,
 .goods-time {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .goods-price {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: var(--text-primary);
 }
@@ -320,7 +320,7 @@ onMounted(() => {
   content: ' 活动价';
   margin-left: 6px;
   color: var(--accent-strong);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -339,7 +339,7 @@ onMounted(() => {
 
 .quantity-selector label {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -349,7 +349,7 @@ onMounted(() => {
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  font-size: 14px;
+  font-size: 16px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--text-primary);
 }
@@ -368,11 +368,11 @@ onMounted(() => {
   }
 
   .goods-name {
-    font-size: 18px;
+    font-size: 20px;
   }
 
   .goods-price {
-    font-size: 24px;
+    font-size: 28px;
   }
 
   .quantity-selector {

@@ -39,7 +39,7 @@
 }
 
 html {
-  font-size: 16px;
+  font-size: 18px;
 }
 
 body {
@@ -131,7 +131,7 @@ textarea:focus-visible {
   border-radius: 999px;
   background: var(--bg-surface-soft);
   color: var(--text-primary);
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -152,7 +152,7 @@ textarea:focus-visible {
   border-radius: 999px;
   color: var(--text-secondary);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -175,7 +175,7 @@ textarea:focus-visible {
 
 .username {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -186,7 +186,7 @@ textarea:focus-visible {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -221,7 +221,7 @@ textarea:focus-visible {
 
 .page-title {
   color: var(--text-primary);
-  font-size: clamp(2rem, 2.8vw, 2.75rem);
+  font-size: 44px;
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.04em;
@@ -231,7 +231,7 @@ textarea:focus-visible {
   max-width: 48rem;
   margin-top: 10px;
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .btn {
@@ -242,7 +242,7 @@ textarea:focus-visible {
   padding: 0 18px;
   border: 1px solid transparent;
   border-radius: 14px;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   text-decoration: none;
 }
@@ -296,7 +296,7 @@ textarea:focus-visible {
   display: block;
   margin-bottom: 8px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -308,7 +308,7 @@ textarea:focus-visible {
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 16px;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
 }
 
@@ -345,7 +345,7 @@ textarea.form-input {
   background: rgba(255, 255, 255, 0.94);
   box-shadow: var(--shadow-sm);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   animation: toast-slide 220ms ease-out;
   backdrop-filter: blur(18px);
@@ -381,7 +381,7 @@ textarea.form-input {
   padding: 14px 16px;
   border: 1px solid transparent;
   border-radius: 16px;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .alert-success {
@@ -436,7 +436,7 @@ textarea.form-input {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent-strong);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -444,14 +444,14 @@ textarea.form-input {
 
 .auth-title {
   color: var(--text-primary);
-  font-size: 34px;
+  font-size: 38px;
   line-height: 1.1;
   letter-spacing: -0.04em;
 }
 
 .auth-subtitle {
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .auth-form {
@@ -460,7 +460,7 @@ textarea.form-input {
 
 .auth-footer {
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 16px;
   text-align: center;
 }
 
@@ -523,12 +523,12 @@ textarea.form-input {
 .empty-state h3 {
   margin-bottom: 8px;
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: 28px;
 }
 
 .empty-state p {
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 17px;
 }
 
 .visually-hidden {
@@ -597,7 +597,7 @@ textarea.form-input {
   }
 
   .auth-title {
-    font-size: 30px;
+    font-size: 34px;
   }
 
   .toast-container {

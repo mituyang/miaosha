@@ -1,5 +1,8 @@
 CREATE DATABASE IF NOT EXISTS seckill DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 USE seckill;
 
 -- 商品表 (商品数量少，可以用自增，也可以改成分布式ID，这里为了后台管理方便保留自增)

@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   cursor: pointer;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
@@ -358,7 +358,7 @@ onBeforeUnmount(() => {
 .form-helper {
   margin-top: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
 }
 
@@ -401,7 +401,7 @@ onBeforeUnmount(() => {
 
 .modal-header h2 {
   color: var(--text-primary);
-  font-size: 24px;
+  font-size: 28px;
   line-height: 1.2;
 }
 
@@ -415,7 +415,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   background: #fff;
   color: var(--text-secondary);
-  font-size: 28px;
+  font-size: 32px;
   line-height: 1;
   cursor: pointer;
 }
