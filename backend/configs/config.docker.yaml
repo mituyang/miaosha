@@ -15,7 +15,6 @@ mysql:
 
 redis:
   addr: redis:6379
-  password: ""
   db: 0
   pool_size: 2000
   segment_count: 1            # 库存分段数量

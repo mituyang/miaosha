@@ -94,7 +94,6 @@ type MySQLConfig struct {
 
 type RedisConfig struct {
 	Addr         string `yaml:"addr"`
-	Password     string `yaml:"password"`
 	DB           int    `yaml:"db"`
 	PoolSize     int    `yaml:"pool_size"`
 	SegmentCount int    `yaml:"segment_count"` // 库存分段数量
@@ -193,9 +192,6 @@ func applyEnvOverrides(cfg *Config) error {
 
 	if v, ok := os.LookupEnv("REDIS_ADDR"); ok {
 		cfg.Redis.Addr = v
-	}
-	if v, ok := os.LookupEnv("REDIS_PASSWORD"); ok {
-		cfg.Redis.Password = v
 	}
 	if err := setIntFromEnv("REDIS_DB", &cfg.Redis.DB); err != nil {
 		return err

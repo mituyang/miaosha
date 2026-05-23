@@ -14,7 +14,6 @@ var Client *redis.Client
 func Init(cfg *config.RedisConfig) error {
 	Client = redis.NewClient(&redis.Options{
 		Addr:     cfg.Addr,
-		Password: cfg.Password,
 		DB:       cfg.DB,
 		PoolSize: cfg.PoolSize,
 	})
