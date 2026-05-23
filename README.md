@@ -91,7 +91,7 @@
 
 ### 前置要求
 - Docker & Docker Compose
-- Go 1.24+ (本机构建后端二进制)
+- Go 1.24+ (仅 `make up` 本机构建模式需要)
 - Node.js 18+ (本地开发)
 
 ### 环境变量（可选）
@@ -103,29 +103,33 @@ cp .env.example .env
 
 ### 一键启动
 
+默认 Docker 部署会在镜像构建阶段编译后端，不需要先在本机生成二进制文件：
+
 ```bash
 # 克隆项目
 git clone <repository-url>
 cd seckill
 
-# 先在本机构建 Linux 后端二进制
-cd backend
-./bin/build-linux.sh
-cd ..
-
 # 启动所有服务
-docker-compose up -d
+docker compose up -d --build
 
 # 查看日志
-docker-compose logs -f
+docker compose logs -f
 ```
 
-Windows PowerShell 构建后端二进制：
+如果希望先在本机构建后端二进制，再把产物复制进 Docker 镜像，使用：
+
+```bash
+make up
+```
+
+Windows PowerShell 没有 `make` 时，可手动执行等价命令：
 
 ```powershell
 cd backend
 .\bin\build-linux.ps1
 cd ..
+docker compose -f docker-compose.yml -f docker-compose.local-build.yml up -d --build
 ```
 
 服务地址：

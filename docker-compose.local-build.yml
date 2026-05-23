@@ -1,0 +1,10 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.local
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.local
