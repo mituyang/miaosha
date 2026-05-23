@@ -198,7 +198,7 @@ func initRuntimeConfig() {
 	// 2) 在仓库根执行：go run ./test/benchmark.go -> .env
 	loadDotEnvCandidates("../.env", ".env")
 
-	BaseURL = getEnv("BASE_URL", "http://localhost:8080")
+	BaseURL = getEnv("BASE_URL", "http://localhost:18080")
 	AdminUsername = strings.TrimSpace(os.Getenv("ADMIN_USERNAME"))
 	AdminPassword = strings.TrimSpace(os.Getenv("ADMIN_PASSWORD"))
 	MySQLDSN = getEnv("MYSQL_DSN", "root:root123@tcp(127.0.0.1:13306)/seckill?parseTime=true&loc=Local")

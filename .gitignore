@@ -6,6 +6,8 @@ logs/
 bin/
 !backend/bin/
 backend/bin/*
+!backend/bin/build-linux.sh
+!backend/bin/build-linux.ps1
 !backend/bin/kafka-startup.sh
 !backend/bin/throttled-healthcheck.sh
 *.txt

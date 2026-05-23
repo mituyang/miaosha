@@ -3,18 +3,18 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.0.0/16
+        - subnet: ${DOCKER_SUBNET:-172.28.0.0/16}
 
 services:
   mysql:
-    image: mysql:8.0
+    image: ${MYSQL_IMAGE:-mysql:8.0}
     container_name: seckill-mysql
     environment:
-      MYSQL_ROOT_PASSWORD: "root123"
-      MYSQL_DATABASE: seckill
-      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-root123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-seckill}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
-      - "13306:3306"
+      - "${MYSQL_PORT:-13306}:3306"
     volumes:
       - ./backend/scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
       - mysql_data:/var/lib/mysql
@@ -34,20 +34,20 @@ services:
       seckill-net:
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis:7-alpine}
     container_name: seckill-redis
     ports:
-      - "16379:6379"
+      - "${REDIS_PORT:-16379}:6379"
     volumes:
       - redis_data:/data
     networks:
       seckill-net:
 
   redisinsight:
-    image: redis/redisinsight:3.2.0
+    image: ${REDISINSIGHT_IMAGE:-redis/redisinsight:3.2.0}
     container_name: seckill-redisinsight
     ports:
-      - "5540:5540"
+      - "${REDISINSIGHT_PORT:-5540}:5540"
     volumes:
       - redisinsight_data:/data
     depends_on:
@@ -58,13 +58,13 @@ services:
       seckill-net:
 
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.5.0
+    image: ${ZOOKEEPER_IMAGE:-confluentinc/cp-zookeeper:7.5.0}
     container_name: seckill-zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT:-2181}:2181"
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_log:/var/lib/zookeeper/log
@@ -80,15 +80,15 @@ services:
       seckill-net:
 
   kafka:
-    image: confluentinc/cp-kafka:7.5.0
+    image: ${KAFKA_IMAGE:-confluentinc/cp-kafka:7.5.0}
     container_name: seckill-kafka
     ports:
-      - "9092:9092"
-      - "19092:9092"
+      - "${KAFKA_INTERNAL_HOST_PORT:-9092}:9092"
+      - "${KAFKA_HOST_PORT:-19092}:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:19092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${KAFKA_HOST_PORT:-19092}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -122,10 +122,10 @@ services:
       seckill-net:
 
   akhq:
-    image: tchiotludo/akhq:0.26.0
+    image: ${AKHQ_IMAGE:-tchiotludo/akhq:0.26.0}
     container_name: seckill-akhq
     ports:
-      - "8086:8080"
+      - "${AKHQ_PORT:-8086}:8080"
     environment:
       AKHQ_CONFIGURATION: |
         akhq:
@@ -146,10 +146,14 @@ services:
       dockerfile: Dockerfile
     container_name: seckill-backend
     ports:
-      - "18080:8080"
+      - "${SERVER_PORT:-18080}:8080"
     environment:
-      TZ: Asia/Shanghai
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-seckill}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root123}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-24}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env}
       STARTUP_FLUSH_REDIS_ON_START: ${STARTUP_FLUSH_REDIS_ON_START:-false}
@@ -184,8 +188,12 @@ services:
     container_name: seckill-worker
     command: ["/app/worker"]
     environment:
-      TZ: Asia/Shanghai
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-seckill}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-root123}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+      JWT_EXPIRE_HOURS: ${JWT_EXPIRE_HOURS:-24}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?ADMIN_USERNAME is required in .env}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required in .env}
     volumes:
@@ -207,7 +215,7 @@ services:
       dockerfile: Dockerfile
     container_name: seckill-frontend
     ports:
-      - "80:80"
+      - "${FRONTEND_PORT:-80}:80"
     depends_on:
       - backend
     restart: unless-stopped

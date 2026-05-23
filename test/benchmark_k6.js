@@ -80,7 +80,7 @@ function readEnv(key, fallback) {
   return fallback;
 }
 
-const BASE_URL = readEnv('BASE_URL', 'http://localhost:8080').replace(/\/+$/, '');
+const BASE_URL = readEnv('BASE_URL', 'http://localhost:18080').replace(/\/+$/, '');
 const ADMIN_USERNAME = String(readEnv('ADMIN_USERNAME', '')).trim();
 const ADMIN_PASSWORD = String(readEnv('ADMIN_PASSWORD', '')).trim();
 const ACTIVITY_ID = Number(readEnv('ACTIVITY_ID', 0));

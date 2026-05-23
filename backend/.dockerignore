@@ -1,0 +1,6 @@
+*
+!bin/
+!bin/api
+!bin/worker
+!configs/
+!configs/**

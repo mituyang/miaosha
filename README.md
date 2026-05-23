@@ -91,7 +91,7 @@
 
 ### 前置要求
 - Docker & Docker Compose
-- Go 1.24+ (本地开发)
+- Go 1.24+ (本机构建后端二进制)
 - Node.js 18+ (本地开发)
 
 ### 环境变量（可选）
@@ -108,6 +108,11 @@ cp .env.example .env
 git clone <repository-url>
 cd seckill
 
+# 先在本机构建 Linux 后端二进制
+cd backend
+./bin/build-linux.sh
+cd ..
+
 # 启动所有服务
 docker-compose up -d
 
@@ -115,9 +120,17 @@ docker-compose up -d
 docker-compose logs -f
 ```
 
+Windows PowerShell 构建后端二进制：
+
+```powershell
+cd backend
+.\bin\build-linux.ps1
+cd ..
+```
+
 服务地址：
 - 前端: http://localhost
-- 后端 API: http://localhost:8080
+- 后端 API: http://localhost:18080
 - MySQL: localhost:13306
 - Redis: localhost:16379
 - Kafka: localhost:19092
@@ -156,31 +169,31 @@ npm run build
 
 ### 1. 注册用户
 ```bash
-curl -X POST http://localhost:8080/api/auth/register \
+curl -X POST http://localhost:18080/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"user1","password":"123456"}'
 ```
 
 ### 2. 登录获取 Token
 ```bash
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:18080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"user1","password":"123456"}'
 ```
 
 ### 3. 预热库存
 ```bash
-ADMIN_TOKEN=$(curl -s -X POST http://localhost:8080/api/admin/login \
+ADMIN_TOKEN=$(curl -s -X POST http://localhost:18080/api/admin/login \
   -H "Content-Type: application/json" \
   -d '{"username":"<admin-username>","password":"<admin-password>"}' | jq -r '.data.token')
 
-curl -X POST http://localhost:8080/api/admin/warmup \
+curl -X POST http://localhost:18080/api/admin/warmup \
   -H "Authorization: Bearer ${ADMIN_TOKEN}"
 ```
 
 ### 4. 参与秒杀
 ```bash
-curl -X POST http://localhost:8080/api/seckill/buy \
+curl -X POST http://localhost:18080/api/seckill/buy \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your-token>" \
   -d '{"goods_id":1,"quantity":1}'
@@ -188,7 +201,7 @@ curl -X POST http://localhost:8080/api/seckill/buy \
 
 ### 5. 查询订单
 ```bash
-curl http://localhost:8080/api/orders \
+curl http://localhost:18080/api/orders \
   -H "Authorization: Bearer <your-token>"
 ```
 
@@ -255,7 +268,7 @@ k6 run benchmark_k6.js
 
 常用环境变量：
 
-- `BASE_URL`: 默认 `http://localhost:8080`
+- `BASE_URL`: 默认 `http://localhost:18080`
 - `ADMIN_USERNAME` / `ADMIN_PASSWORD`: 必填，压测前用于登录后台并调用预热接口
 - `TOKEN_FILE`: 默认 `tokens_100k.txt`
 - `GOODS_ID`: 默认 `1`
