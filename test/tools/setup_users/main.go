@@ -15,7 +15,7 @@ import (
 const (
 	DSN        = "root:root123@tcp(localhost:13306)/seckill?charset=utf8mb4&parseTime=True"
 	TotalUsers = 10_000_000 // 1000万用户
-	BatchSize  = 30000      // 每批插入数量 (MySQL placeholder 限制 65535, 2字段×20000=40000)
+	BatchSize  = 20000      // 每批插入数量 (MySQL placeholder 限制 65535, 3字段×20000=60000)
 )
 
 func main() {
@@ -77,16 +77,18 @@ func main() {
 
 func insertBatch(db *sql.DB, startIdx, count int, hashedPwd string) error {
 	valueStrings := make([]string, 0, count)
-	valueArgs := make([]interface{}, 0, count*2)
+	valueArgs := make([]interface{}, 0, count*3)
 
 	for j := 0; j < count; j++ {
-		valueStrings = append(valueStrings, "(?, ?)")
-		username := fmt.Sprintf("test_user_%d", startIdx+j+1)
-		valueArgs = append(valueArgs, username, hashedPwd)
+		valueStrings = append(valueStrings, "(?, ?, ?)")
+		userIndex := startIdx + j + 1
+		username := fmt.Sprintf("test_user_%d", userIndex)
+		email := fmt.Sprintf("test%d@yyqw.shop", userIndex)
+		valueArgs = append(valueArgs, username, email, hashedPwd)
 	}
 
 	stmt := fmt.Sprintf(
-		"INSERT IGNORE INTO users (username, password) VALUES %s",
+		"INSERT INTO users (username, email, password) VALUES %s ON DUPLICATE KEY UPDATE email = VALUES(email)",
 		strings.Join(valueStrings, ","),
 	)
 
