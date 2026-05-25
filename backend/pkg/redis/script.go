@@ -10,9 +10,6 @@ import (
 	redisLib "github.com/redis/go-redis/v9"
 )
 
-//go:embed seckill_segment.lua
-var seckillSegmentScript string
-
 //go:embed seckill_check.lua
 var seckillCheckScript string
 
@@ -22,40 +19,32 @@ var seckillDecrScript string
 //go:embed token_bucket.lua
 var tokenBucketScript string
 
-var seckillSegmentSHA string
 var seckillCheckSHA string
 var seckillDecrSHA string
 var tokenBucketSHA string
 
 // LoadScript 预加载 Lua 脚本到 Redis
 func LoadScript(ctx context.Context) error {
-	// 加载分段脚本
-	sha, err := Client.ScriptLoad(ctx, seckillSegmentScript).Result()
-	if err != nil {
-		return err
-	}
-	seckillSegmentSHA = sha
-
 	// 加载检查脚本
-	sha2, err := Client.ScriptLoad(ctx, seckillCheckScript).Result()
+	sha, err := Client.ScriptLoad(ctx, seckillCheckScript).Result()
 	if err != nil {
 		return err
 	}
-	seckillCheckSHA = sha2
+	seckillCheckSHA = sha
 
 	// 加载扣减脚本
-	sha3, err := Client.ScriptLoad(ctx, seckillDecrScript).Result()
+	sha, err = Client.ScriptLoad(ctx, seckillDecrScript).Result()
 	if err != nil {
 		return err
 	}
-	seckillDecrSHA = sha3
+	seckillDecrSHA = sha
 
 	// 加载令牌桶脚本
-	sha4, err := Client.ScriptLoad(ctx, tokenBucketScript).Result()
+	sha, err = Client.ScriptLoad(ctx, tokenBucketScript).Result()
 	if err != nil {
 		return err
 	}
-	tokenBucketSHA = sha4
+	tokenBucketSHA = sha
 
 	return nil
 }
@@ -109,48 +98,6 @@ const (
 	SeckillNotOnSale   SeckillResult = -2 // 活动不可抢购
 	SeckillScriptError SeckillResult = -99
 )
-
-// PreDecrStock 预减库存 (原子操作) - 使用分段库存
-// goodsID: 商品ID
-// userID: 用户ID
-// 返回: SeckillResult, 成功的分段索引（用于MySQL分段扣减）
-func PreDecrStock(ctx context.Context, goodsID, userID uint64) (SeckillResult, int, error) {
-	// 构建分段 keys
-	keys := make([]string, SegmentCount+1)
-	for i := 0; i < SegmentCount; i++ {
-		keys[i] = SegmentStockKey(goodsID, i)
-	}
-	keys[SegmentCount] = BoughtKey(goodsID)
-
-	// 随机起始分段，分散压力
-	startIdx := rand.Intn(SegmentCount)
-
-	result, err := evalShaIntWithRetry(ctx, seckillSegmentSHA, keys, userID, SegmentCount, startIdx)
-	if err != nil {
-		return SeckillScriptError, 0, err
-	}
-
-	if result > 0 {
-		// 返回成功，result 是分段索引（1-based），转为 0-based
-		return SeckillSuccess, result - 1, nil
-	}
-	return SeckillResult(result), 0, nil
-}
-
-// RollbackStock 回滚库存 (下单失败时调用)
-func RollbackStock(ctx context.Context, goodsID uint64, segmentID int, userID uint64) error {
-	segmentKey := SegmentStockKey(goodsID, segmentID)
-	boughtKey := BoughtKey(goodsID)
-	deductedKey := DeductedKey(goodsID)
-	userIDStr := fmt.Sprintf("%d", userID)
-
-	pipe := Client.Pipeline()
-	pipe.Incr(ctx, segmentKey)
-	pipe.HDel(ctx, boughtKey, userIDStr)
-	pipe.SRem(ctx, deductedKey, userID)
-	_, err := pipe.Exec(ctx)
-	return err
-}
 
 // CheckAndMark 检查用户资格、标记用户、扣减库存（原子操作）
 // Redis 扣库存成功 = 秒杀成功

@@ -69,9 +69,11 @@ func (r *UserRepository) List(filter UserFilter) ([]AdminUserItem, error) {
 func (r *UserRepository) ListPage(filter UserFilter, page, pageSize int) ([]AdminUserItem, int64, error) {
 	var users []AdminUserItem
 	query := database.DB.Table("users")
+	keyword := strings.TrimSpace(filter.Keyword)
 
-	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		query = query.Where("username LIKE ?", "%"+keyword+"%")
+	if keyword != "" {
+		likeKeyword := "%" + keyword + "%"
+		query = query.Where("username LIKE ? OR CAST(id AS CHAR) LIKE ?", likeKeyword, likeKeyword)
 	}
 	if filter.Status != nil {
 		query = query.Where("status = ?", *filter.Status)
@@ -82,9 +84,23 @@ func (r *UserRepository) ListPage(filter UserFilter, page, pageSize int) ([]Admi
 		return nil, 0, err
 	}
 
-	err := query.Select("id, username, status, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at").
-		Order("id DESC").
-		Limit(pageSize).
+	listQuery := query.Select("id, username, status, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at")
+	if keyword != "" {
+		listQuery = listQuery.
+			Select(
+				"id, username, status, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS created_at, CASE WHEN username = ? OR CAST(id AS CHAR) = ? THEN 0 WHEN username LIKE ? OR CAST(id AS CHAR) LIKE ? THEN 1 ELSE 2 END AS match_rank",
+				keyword,
+				keyword,
+				keyword+"%",
+				keyword+"%",
+			).
+			Order("match_rank ASC").
+			Order("id ASC")
+	} else {
+		listQuery = listQuery.Order("id DESC")
+	}
+
+	err := listQuery.Limit(pageSize).
 		Offset((page - 1) * pageSize).
 		Find(&users).Error
 	return users, total, err

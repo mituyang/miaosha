@@ -347,26 +347,6 @@
             </div>
           </div>
 
-          <div v-if="selectedOrder" class="detail-card">
-            <div class="panel-header slim">
-              <h3>订单详情</h3>
-              <button class="btn btn-secondary" @click="selectedOrder = null">关闭</button>
-            </div>
-            <div class="detail-grid">
-              <div><span>订单号</span><strong>{{ selectedOrder.id }}</strong></div>
-              <div><span>用户</span><strong>{{ selectedOrder.username }}</strong></div>
-              <div><span>商品</span><strong>{{ selectedOrder.goodsName }}</strong></div>
-              <div><span>活动</span><strong>{{ selectedOrder.activityTitle || '-' }}</strong></div>
-              <div><span>活动 ID</span><strong>{{ selectedOrder.activityId || '-' }}</strong></div>
-              <div><span>状态</span><strong>{{ orderStatusText(selectedOrder.status) }}</strong></div>
-              <div><span>数量</span><strong>{{ selectedOrder.quantity }}</strong></div>
-              <div><span>金额</span><strong>{{ formatCurrency(selectedOrder.payAmount) }}</strong></div>
-              <div><span>请求时间</span><strong>{{ formatTime(selectedOrder.requestTime) }}</strong></div>
-              <div><span>创建时间</span><strong>{{ formatTime(selectedOrder.createTime) }}</strong></div>
-              <div><span>支付时间</span><strong>{{ formatTime(selectedOrder.payTime) }}</strong></div>
-              <div><span>取消时间</span><strong>{{ formatTime(selectedOrder.cancelTime) }}</strong></div>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -811,12 +791,37 @@
       </section>
     </div>
 
+    <Teleport to="body">
+      <div v-if="selectedOrder" class="modal-backdrop" @click.self="closeOrderDetail">
+        <section class="order-detail-modal" role="dialog" aria-modal="true" aria-labelledby="order-detail-title">
+          <div class="panel-header slim modal-header">
+            <h3 id="order-detail-title">订单详情</h3>
+            <button class="btn btn-secondary" @click="closeOrderDetail">关闭</button>
+          </div>
+          <div class="detail-grid modal-detail-grid">
+            <div><span>订单号</span><strong>{{ selectedOrder.id }}</strong></div>
+            <div><span>用户</span><strong>{{ selectedOrder.username }}</strong></div>
+            <div><span>商品</span><strong>{{ selectedOrder.goodsName }}</strong></div>
+            <div><span>活动</span><strong>{{ selectedOrder.activityTitle || '-' }}</strong></div>
+            <div><span>活动 ID</span><strong>{{ selectedOrder.activityId || '-' }}</strong></div>
+            <div><span>状态</span><strong>{{ orderStatusText(selectedOrder.status) }}</strong></div>
+            <div><span>数量</span><strong>{{ selectedOrder.quantity }}</strong></div>
+            <div><span>金额</span><strong>{{ formatCurrency(selectedOrder.payAmount) }}</strong></div>
+            <div><span>请求时间</span><strong>{{ formatTime(selectedOrder.requestTime) }}</strong></div>
+            <div><span>创建时间</span><strong>{{ formatTime(selectedOrder.createTime) }}</strong></div>
+            <div><span>支付时间</span><strong>{{ formatTime(selectedOrder.payTime) }}</strong></div>
+            <div><span>取消时间</span><strong>{{ formatTime(selectedOrder.cancelTime) }}</strong></div>
+          </div>
+        </section>
+      </div>
+    </Teleport>
+
     <Toast ref="toast" />
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   adminCreateActivity,
   adminCreateGoods,
@@ -894,6 +899,7 @@ const activities = ref([])
 const orders = ref([])
 const users = ref([])
 const selectedOrder = ref(null)
+let bodyOverflowBeforeModal = ''
 const savingGoods = ref(false)
 const savingActivity = ref(false)
 const rebuildingStats = ref(false)
@@ -1474,6 +1480,16 @@ const fetchOrderDetail = async orderId => {
   }
 }
 
+const closeOrderDetail = () => {
+  selectedOrder.value = null
+}
+
+const handleOrderDetailKeydown = event => {
+  if (event.key === 'Escape' && selectedOrder.value) {
+    closeOrderDetail()
+  }
+}
+
 const ensureTabLoaded = async (tab, force = false) => {
   if (!verified.value) return
   if (tab === 'goods' && !force && loadedTabs.goods && loadedTabs.activities) return
@@ -1868,7 +1884,18 @@ watch(activeTab, async tab => {
   }
 })
 
+watch(selectedOrder, order => {
+  if (order) {
+    bodyOverflowBeforeModal = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return
+  }
+  document.body.style.overflow = bodyOverflowBeforeModal
+})
+
 onMounted(async () => {
+  window.addEventListener('keydown', handleOrderDetailKeydown)
+
   if (!adminToken.value) return
 
   try {
@@ -1882,6 +1909,11 @@ onMounted(async () => {
   } catch (error) {
     logoutAdmin(false)
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleOrderDetailKeydown)
+  document.body.style.overflow = bodyOverflowBeforeModal
 })
 </script>
 
@@ -2420,12 +2452,42 @@ onMounted(async () => {
   color: var(--danger);
 }
 
-.detail-card {
-  margin-top: 18px;
-  padding: 20px;
-  background: rgba(247, 243, 234, 0.72);
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(23, 23, 23, 0.38);
+  backdrop-filter: blur(10px);
+}
+
+.order-detail-modal {
+  width: min(960px, 100%);
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 24px;
+  background: rgba(247, 243, 234, 0.96);
   border: 1px solid var(--border);
-  border-radius: 18px;
+  border-radius: 20px;
+  box-shadow: 0 28px 80px rgba(23, 23, 23, 0.22);
+}
+
+.modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -24px -24px 16px;
+  padding: 24px 24px 16px;
+  background: rgba(247, 243, 234, 0.96);
+  border-bottom: 1px solid rgba(23, 23, 23, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.modal-detail-grid {
+  margin-bottom: 0;
 }
 
 .detail-grid div {
@@ -2517,6 +2579,21 @@ onMounted(async () => {
 @media (max-width: 640px) {
   .admin-page {
     padding: 16px;
+  }
+
+  .modal-backdrop {
+    align-items: stretch;
+    padding: 14px;
+  }
+
+  .order-detail-modal {
+    max-height: calc(100vh - 28px);
+    padding: 18px;
+  }
+
+  .modal-header {
+    margin: -18px -18px 16px;
+    padding: 18px 18px 14px;
   }
 
   .admin-auth-card,
