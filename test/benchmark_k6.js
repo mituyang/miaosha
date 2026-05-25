@@ -105,6 +105,7 @@ const CLOSED_LOOP_PACE_MS = Number(
 );
 
 const successCount = new Counter('success_count');
+const http200Count = new Counter('http_200_count');
 const soldOutCount = new Counter('sold_out_count');
 const limitExceedCount = new Counter('limit_exceed_count');
 const rateLimitedCount = new Counter('rate_limited_count');
@@ -114,6 +115,7 @@ const non200StatusCount = new Counter('non_200_status_count');
 const transportFailedCount = new Counter('transport_failed_count');
 const requestDurationMs = new Trend('request_duration_ms');
 const responseDecodedRate = new Rate('response_decoded_rate');
+const httpSuccessRate = new Rate('http_success_rate');
 const businessSuccessRate = new Rate('business_success_rate');
 
 const tokens = new SharedArray('tokens', function () {
@@ -305,6 +307,7 @@ export default function (data) {
 
   if (res.error) {
     transportFailedCount.add(1);
+    httpSuccessRate.add(false);
     businessSuccessRate.add(false);
     if (EXECUTOR_MODE !== 'arrival-rate' && CLOSED_LOOP_THROTTLE && CLOSED_LOOP_PACE_MS > 0) {
       const elapsedMs = Date.now() - startedAt;
@@ -316,7 +319,11 @@ export default function (data) {
     return;
   }
 
-  if (res.status !== 200) {
+  const httpOK = res.status === 200;
+  httpSuccessRate.add(httpOK);
+  if (httpOK) {
+    http200Count.add(1);
+  } else {
     non200StatusCount.add(1);
   }
 
@@ -418,7 +425,8 @@ function percent(value) {
 
 function buildTextSummary(data) {
   const totalRequests = metricCount(data, 'http_reqs');
-  const success = metricCount(data, 'success_count');
+  const http200 = metricCount(data, 'http_200_count');
+  const orderSuccess = metricCount(data, 'success_count');
   const soldOut = metricCount(data, 'sold_out_count');
   const limitExceed = metricCount(data, 'limit_exceed_count');
   const rateLimited = metricCount(data, 'rate_limited_count');
@@ -430,10 +438,12 @@ function buildTextSummary(data) {
   const p50Latency = metricTrend(data, 'request_duration_ms', 'med');
   const p95Latency = metricTrend(data, 'request_duration_ms', 'p(95)');
   const p99Latency = metricTrend(data, 'request_duration_ms', 'p(99)');
-  const businessRate = metricRate(data, 'business_success_rate');
+  const httpRate = metricRate(data, 'http_success_rate');
+  const orderSuccessRate = metricRate(data, 'business_success_rate');
   const decodeRate = metricRate(data, 'response_decoded_rate');
   const systemQPS = DURATION > 0 ? totalRequests / DURATION : 0;
-  const successQPS = DURATION > 0 ? success / DURATION : 0;
+  const http200QPS = DURATION > 0 ? http200 / DURATION : 0;
+  const orderSuccessQPS = DURATION > 0 ? orderSuccess / DURATION : 0;
 
   return [
     '',
@@ -451,18 +461,21 @@ function buildTextSummary(data) {
     `maxVUs:          ${EXECUTOR_MODE === 'arrival-rate' && TARGET_QPS > 0 ? MAX_VUS : CONSTANT_VUS}`,
     '',
     `总请求数:        ${totalRequests}`,
-    `成功请求:        ${success}`,
+    `HTTP 200响应:    ${http200}`,
+    `下单成功:        ${orderSuccess}`,
     `已售罄:          ${soldOut}`,
     `超过限购:        ${limitExceed}`,
     `触发限流:        ${rateLimited}`,
     `业务失败:        ${businessFailed}`,
     `非200响应:       ${non200}`,
-    `传输失败:        ${transportFailed}`,
+    `请求未到系统:    ${transportFailed}`,
     `响应解码失败:    ${decodeFailed}`,
     '',
     `系统QPS:         ${round(systemQPS)} req/s`,
-    `成功QPS:         ${round(successQPS)} req/s`,
-    `业务成功率:      ${percent(businessRate)}`,
+    `HTTP 200 QPS:    ${round(http200QPS)} req/s`,
+    `下单成功QPS:     ${round(orderSuccessQPS)} req/s`,
+    `HTTP成功率:      ${percent(httpRate)}`,
+    `下单成功率:      ${percent(orderSuccessRate)}`,
     `解码成功率:      ${percent(decodeRate)}`,
     '',
     `平均延迟:        ${round(avgLatency)} ms`,
@@ -475,7 +488,8 @@ function buildTextSummary(data) {
 
 function buildHTMLSummary(data) {
   const totalRequests = metricCount(data, 'http_reqs');
-  const success = metricCount(data, 'success_count');
+  const http200 = metricCount(data, 'http_200_count');
+  const orderSuccess = metricCount(data, 'success_count');
   const soldOut = metricCount(data, 'sold_out_count');
   const limitExceed = metricCount(data, 'limit_exceed_count');
   const rateLimited = metricCount(data, 'rate_limited_count');
@@ -487,10 +501,12 @@ function buildHTMLSummary(data) {
   const p50Latency = metricTrend(data, 'request_duration_ms', 'med');
   const p95Latency = metricTrend(data, 'request_duration_ms', 'p(95)');
   const p99Latency = metricTrend(data, 'request_duration_ms', 'p(99)');
-  const businessRate = metricRate(data, 'business_success_rate');
+  const httpRate = metricRate(data, 'http_success_rate');
+  const orderSuccessRate = metricRate(data, 'business_success_rate');
   const decodeRate = metricRate(data, 'response_decoded_rate');
   const systemQPS = DURATION > 0 ? totalRequests / DURATION : 0;
-  const successQPS = DURATION > 0 ? success / DURATION : 0;
+  const http200QPS = DURATION > 0 ? http200 / DURATION : 0;
+  const orderSuccessQPS = DURATION > 0 ? orderSuccess / DURATION : 0;
   const generatedAt = new Date().toISOString();
 
   return `<!DOCTYPE html>
@@ -518,7 +534,7 @@ function buildHTMLSummary(data) {
     <div class="meta">生成时间: ${generatedAt}</div>
     <div class="grid">
       <div class="card"><div class="label">系统QPS</div><div class="value">${round(systemQPS)}</div></div>
-      <div class="card"><div class="label">成功QPS</div><div class="value">${round(successQPS)}</div></div>
+      <div class="card"><div class="label">HTTP 200 QPS</div><div class="value">${round(http200QPS)}</div></div>
       <div class="card"><div class="label">平均延迟(ms)</div><div class="value">${round(avgLatency)}</div></div>
       <div class="card"><div class="label">P99延迟(ms)</div><div class="value">${round(p99Latency)}</div></div>
     </div>
@@ -533,15 +549,19 @@ function buildHTMLSummary(data) {
       <tr><th>closedLoopThrottle</th><td>${CLOSED_LOOP_THROTTLE}</td></tr>
       <tr><th>paceMs</th><td>${CLOSED_LOOP_THROTTLE && CLOSED_LOOP_PACE_MS > 0 ? round(CLOSED_LOOP_PACE_MS) : 'disabled'}</td></tr>
       <tr><th>总请求数</th><td>${totalRequests}</td></tr>
-      <tr><th>成功请求</th><td>${success}</td></tr>
+      <tr><th>HTTP 200响应</th><td>${http200}</td></tr>
+      <tr><th>下单成功</th><td>${orderSuccess}</td></tr>
       <tr><th>已售罄</th><td>${soldOut}</td></tr>
       <tr><th>超过限购</th><td>${limitExceed}</td></tr>
       <tr><th>触发限流</th><td>${rateLimited}</td></tr>
       <tr><th>业务失败</th><td>${businessFailed}</td></tr>
       <tr><th>非200响应</th><td>${non200}</td></tr>
-      <tr><th>传输失败</th><td>${transportFailed}</td></tr>
+      <tr><th>请求未到系统</th><td>${transportFailed}</td></tr>
       <tr><th>响应解码失败</th><td>${decodeFailed}</td></tr>
-      <tr><th>业务成功率</th><td>${percent(businessRate)}</td></tr>
+      <tr><th>HTTP 200 QPS</th><td>${round(http200QPS)} req/s</td></tr>
+      <tr><th>下单成功QPS</th><td>${round(orderSuccessQPS)} req/s</td></tr>
+      <tr><th>HTTP成功率</th><td>${percent(httpRate)}</td></tr>
+      <tr><th>下单成功率</th><td>${percent(orderSuccessRate)}</td></tr>
       <tr><th>解码成功率</th><td>${percent(decodeRate)}</td></tr>
       <tr><th>平均延迟</th><td>${round(avgLatency)} ms</td></tr>
       <tr><th>P50延迟</th><td>${round(p50Latency)} ms</td></tr>
@@ -575,7 +595,8 @@ export function handleSummary(data) {
     },
     metrics: {
       totalRequests: metricCount(data, 'http_reqs'),
-      successRequests: metricCount(data, 'success_count'),
+      successRequests: metricCount(data, 'http_200_count'),
+      orderSuccessRequests: metricCount(data, 'success_count'),
       soldOut: metricCount(data, 'sold_out_count'),
       limitExceed: metricCount(data, 'limit_exceed_count'),
       rateLimited: metricCount(data, 'rate_limited_count'),
@@ -583,6 +604,7 @@ export function handleSummary(data) {
       decodeFailed: metricCount(data, 'decode_failed_count'),
       non200Status: metricCount(data, 'non_200_status_count'),
       transportFailed: metricCount(data, 'transport_failed_count'),
+      httpSuccessRate: metricRate(data, 'http_success_rate'),
       businessSuccessRate: metricRate(data, 'business_success_rate'),
       responseDecodedRate: metricRate(data, 'response_decoded_rate'),
       avgLatencyMs: metricTrend(data, 'request_duration_ms', 'avg'),
