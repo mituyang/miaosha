@@ -14,8 +14,8 @@ import (
 // 配置 - 请根据实际情况修改
 const (
 	DSN        = "root:root123@tcp(localhost:13306)/seckill?charset=utf8mb4&parseTime=True"
-	TotalUsers = 10_000_000 // 1000万用户
-	BatchSize  = 20000      // 每批插入数量 (MySQL placeholder 限制 65535, 3字段×20000=60000)
+	TotalUsers = 1_000_000 // 100万用户
+	BatchSize  = 20000     // 每批插入数量 (MySQL placeholder 限制 65535, 3字段×20000=60000)
 )
 
 func main() {

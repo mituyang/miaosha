@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	TotalUsers = 10_000_000 // 生成 1000 万个 token
+	TotalUsers = 1_000_000 // 生成 100 万个 token
 	OutputFile = "../tokens.txt"
 )
 
@@ -28,7 +28,7 @@ func main() {
 	// 兼容两种启动路径：
 	// 1) 在 test/tools 目录执行：go run ./gen_tokens -> ../../.env
 	// 2) 在仓库根执行：go run ./test/tools/gen_tokens -> .env
-	loadDotEnvCandidates("../../.env", "../.env", ".env")
+	loadDotEnvCandidates("../../.env", "../.env", ".env", "../../../.env")
 	jwtSecret = strings.TrimSpace(os.Getenv("JWT_SECRET"))
 
 	if jwtSecret == "" {

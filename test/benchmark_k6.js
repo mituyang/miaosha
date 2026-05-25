@@ -83,7 +83,7 @@ function readEnv(key, fallback) {
 const BASE_URL = readEnv('BASE_URL', 'http://localhost:18080').replace(/\/+$/, '');
 const ADMIN_USERNAME = String(readEnv('ADMIN_USERNAME', '')).trim();
 const ADMIN_PASSWORD = String(readEnv('ADMIN_PASSWORD', '')).trim();
-const ACTIVITY_ID = Number(readEnv('ACTIVITY_ID', 0));
+const ACTIVITY_ID = Number(readEnv('ACTIVITY_ID', 1));
 const GOODS_ID = Number(readEnv('GOODS_ID', 1));
 const QUANTITY = Number(readEnv('QUANTITY', 1));
 const EXECUTOR_MODE = String(readEnv('EXECUTOR_MODE', 'closed-loop')).trim().toLowerCase();
@@ -93,7 +93,7 @@ const PRE_ALLOCATED_VUS = Number(readEnv('PREALLOCATED_VUS', 500));
 const MAX_VUS = Number(readEnv('MAX_VUS', Math.max(PRE_ALLOCATED_VUS, TARGET_QPS > 0 ? TARGET_QPS : PRE_ALLOCATED_VUS)));
 const CONSTANT_VUS = Number(readEnv('VUS', PRE_ALLOCATED_VUS));
 const MAX_USERS = Number(readEnv('MAX_USERS', 1000000));
-const TOKEN_FILE = String(readEnv('TOKEN_FILE', 'tokens_100k.txt'));
+const TOKEN_FILE = String(readEnv('TOKEN_FILE', 'tokens.txt'));
 const HTTP_TIMEOUT = String(readEnv('HTTP_TIMEOUT', '30s'));
 const REPORT_PREFIX = String(readEnv('REPORT_PREFIX', 'benchmark_k6')).trim() || 'benchmark_k6';
 const CLOSED_LOOP_THROTTLE = String(readEnv('CLOSED_LOOP_THROTTLE', 'false')).trim().toLowerCase() === 'true';
