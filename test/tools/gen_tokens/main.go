@@ -13,7 +13,7 @@ import (
 
 const (
 	TotalUsers = 1_000_000 // 生成 100 万个 token
-	OutputFile = "../tokens.txt"
+	OutputFile = "../../tokens.txt"
 )
 
 var jwtSecret string
